@@ -4,17 +4,22 @@ extern crate tracing;
 extern crate anyhow;
 
 mod cli;
-mod crypto;
 // mod routes;
+
+use std::time::Duration;
 
 use anyhow::Result;
 use clap::Parser;
+use lib::{
+    crypto,
+    message::{receive_message, send_message, Message},
+};
 use redis::aio::Connection;
 use tokio::sync::{Mutex, OnceCell, SetError};
 
 const CHUNK_SIZE: usize = 512_000;
 
-static ECDH_KEY: OnceCell<crypto::EcdhKey> = OnceCell::const_new();
+static ECDH_KEY: OnceCell<crypto::Key> = OnceCell::const_new();
 static REDIS_CONN: Mutex<OnceCell<Connection>> = Mutex::const_new(OnceCell::const_new());
 
 #[tokio::main]
@@ -33,28 +38,29 @@ async fn main() {
     std::process::exit(1)
 }
 
-#[repr(C)]
-pub enum Message {
-    a,
-}
-
 async fn start(args: &cli::Arguments) -> Result<()> {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    connect_redis(&args.db_url).await?;
+    //connect_redis(&args.db_url).await?;
 
     let mut socket = tokio::net::TcpStream::connect((args.bind_address, args.bind_port)).await?;
     debug!(
-        "Successfully onnected to endpoint: {}:{}",
+        "Successfully connected to endpoint: {}:{}",
         args.bind_address, args.bind_port
     );
-
     trace!("Negotiating ECDH shared secret with server...");
-    let ecdh_key = crypto::ecdh_handshake(&mut socket).await?;
-    ECDH_KEY.set(ecdh_key)?;
+    let key = crypto::ecdh_handshake(&mut socket).await?;
 
-    println!("yay");
+    let mut stream = tokio::io::BufStream::new(socket);
+    let Message::Ping { stamp } = receive_message(&mut stream, &key).await? else {
+        bail!("Server started correspondence with unexpected message (expected ping).")
+    };
 
-    Ok(())
+    send_message(&mut stream, &key, Message::Pong { restamp: stamp }).await?;
+
+    println!("all done");
+
+    loop {
+        std::thread::sleep(Duration::from_millis(10));
+    }
 }
 
 async fn connect_redis(db_url: &str) -> Result<()> {
