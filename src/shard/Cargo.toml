@@ -14,11 +14,9 @@ clap = { version = "*", features = ["derive"] }
 
 tokio = { version = "*", features = ["full"] }
 serde = { version = "*", features = ["derive"] }
-serde_json = "*"
 
 once_cell = "*"
-
-uuid = { version = "*", features = ["v4", "fast-rng"] }
+uuid = { version = "*", features = ["v7", "fast-rng"] }
 redis = { version = "*", default-features = false, features = [
     "acl",
     "aio",
