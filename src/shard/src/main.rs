@@ -42,7 +42,9 @@ async fn main() {
 }
 
 async fn start(args: &cli::Arguments) -> Result<()> {
-    let redis = connect_redis(&args.db_url).await?;
+    //let redis = connect_redis(&args.db_url).await?;
+
+trace!("Attempting to connect to server...");
 
     let (stream, key) = {
         let mut reconnections = 5;
@@ -71,7 +73,7 @@ async fn start(args: &cli::Arguments) -> Result<()> {
         }
     };
 
-    listen_server(redis, stream, key).await?;
+    listen_server( stream, key).await?;
 
     Ok(())
 }
@@ -116,7 +118,7 @@ async fn connect_server(args: &cli::Arguments) -> Result<(BufStream<TcpStream>, 
 }
 
 async fn listen_server<S: AsyncRead + AsyncWrite + Unpin>(
-    _redis: Connection,
+    //_redis: Connection,
     mut stream: S,
     key: Key,
 ) -> Result<()> {

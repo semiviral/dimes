@@ -11,7 +11,7 @@ use tokio::{
 use tracing::Level;
 use uuid::Uuid;
 
-pub const MESSAGE_TIMEOUT: Duration = Duration::from_secs(3);
+pub const MESSAGE_TIMEOUT: Duration = Duration::from_secs(10);
 pub const CHUNK_PARTS: usize = 2_000;
 pub const CHUNK_PART_SIZE: usize = 256;
 pub const CHUNK_SIZE: usize = CHUNK_PART_SIZE * CHUNK_PARTS;
@@ -33,7 +33,7 @@ pub enum Message {
     },
 
     PrepareStore {
-        id: Uuid,
+        id: Uuid
     },
 
     PrepareReceive {
@@ -166,18 +166,10 @@ pub async fn send_chunk<W: AsyncWrite + Unpin>(
     mut writer: W,
     key: &Key,
     id: Uuid,
-    chunk: &[u8; CHUNK_SIZE],
+    chunk: &[u8],
 ) -> Result<()> {
     send_message(&mut writer, key, Message::PrepareStore { id }).await?;
-
-    for part in chunk.chunks(CHUNK_PART_SIZE) {
-        send_message(
-            &mut writer,
-            key,
-            Message::ChunkPart(part.try_into().unwrap()),
-        )
-        .await?;
-    }
+    send_messages(&mut writer, key, chunk.chunks(CHUNK_PART_SIZE).map(|part| Message::ChunkPart(part.try_into().unwrap()))).await?;
 
     Ok(())
 }

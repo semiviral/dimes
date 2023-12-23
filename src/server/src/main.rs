@@ -6,8 +6,9 @@ extern crate anyhow;
 use anyhow::Result;
 use lib::{
     crypto::Key,
-    message::{ping_peer, receive_message, Message},
+    message::{ping_peer, receive_message, Message, CHUNK_SIZE, send_chunk},
 };
+use rand::{rngs::OsRng, RngCore};
 use std::{collections::BTreeMap, net::SocketAddr, time::Duration};
 use tokio::{
     io::BufStream,
@@ -29,7 +30,7 @@ async fn main() {
 
     info!("Starting server...");
     let listener = TcpListener::bind("127.0.0.1:3088").await.unwrap();
-    debug!("Server is listening on 127.0.0.1:3000");
+    debug!("Server is listening on 127.0.0.1:3088");
     let ctoken = CancellationToken::new();
 
     tokio::select! {
@@ -41,7 +42,7 @@ async fn main() {
 async fn accept_connections(listener: TcpListener, ctoken: &CancellationToken) -> Result<()> {
     loop {
         trace!("Server is waiting to accept a socket.");
-        let (peer_socket, peer_address) = listener.accept().await.unwrap();
+        let (peer_socket, peer_address) = listener.accept().await?;
         let peer_id = Uuid::now_v7();
         let peer_ctoken = ctoken.child_token();
         debug!("Accepted socket [{peer_id}]: {peer_address}");
@@ -85,6 +86,11 @@ async fn spawn_peer(
         bail!("expected Info message")
     };
 
+    let mut chunk = vec![0u8; CHUNK_SIZE].into_boxed_slice();
+    OsRng.fill_bytes(&mut chunk);
+    send_chunk(&mut peer_stream, &peer_key, Uuid::now_v7(), &chunk).await?;
+    
+
     event!(
         Level::DEBUG,
         peer.id = %peer_id.to_string(),
@@ -109,26 +115,21 @@ async fn listen_peer(
 
     'a: loop {
         tokio::select! {
-            _ = ctoken.cancelled() => {
-                break 'a;
-            }
-
-            _ = sleep(PING_WAIT) => {
-                ping_peer(&mut stream, &key).await?;
-            }
+            _ = ctoken.cancelled() => break 'a,
+            _ = sleep(PING_WAIT) => ping_peer(&mut stream, &key).await,
 
             message = receive_message(&mut stream, &key) => {
                 match message {
                     Ok(message) => {
-                       todo!("handle {message:?}");
+                       todo!("handle {message:?}")
                     }
 
                     Err(err) => {
-                       error!("Error reading message from pipe: {err:?}");
+                       bail!("Error reading message from pipe: {err:?}")
                     }
                 }
             }
-        }
+        }?;
     }
 
     Ok(())
