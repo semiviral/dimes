@@ -13,6 +13,7 @@ use tokio::{
     io::BufStream,
     net::{TcpListener, TcpStream},
     sync::Mutex,
+    time::sleep,
 };
 use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, Level};
@@ -92,6 +93,8 @@ async fn spawn_peer(
         peer.chunks = max_chunks
     );
 
+    
+
     listen_peer(peer_id, peer_ctoken, peer_stream, peer_address, peer_key).await
 }
 
@@ -103,7 +106,6 @@ async fn listen_peer(
     key: Key,
 ) -> Result<()> {
     const PING_WAIT: Duration = Duration::from_secs(10);
-    let mut ping_interval = tokio::time::interval(PING_WAIT);
 
     'a: loop {
         tokio::select! {
@@ -111,7 +113,7 @@ async fn listen_peer(
                 break 'a;
             }
 
-            _ = ping_interval.tick() => {
+            _ = sleep(PING_WAIT) => {
                 ping_peer(&mut stream, &key).await?;
             }
 

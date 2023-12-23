@@ -9,7 +9,7 @@ use anyhow::Result;
 use clap::Parser;
 use lib::{
     crypto::{self, Key},
-    message::{receive_message, send_message, Message},
+    message::{receive_chunk, receive_message, send_message, Message},
 };
 use redis::aio::Connection;
 use std::time::Duration;
@@ -126,7 +126,12 @@ async fn listen_server<S: AsyncRead + AsyncWrite + Unpin>(
                 send_message(&mut stream, &key, Message::Pong { restamp: stamp }).await?
             }
 
-            _ => todo!(),
+            Message::PrepareStore { id: _ } => {
+                let chunk = receive_chunk(&mut stream, &key).await?;
+                info!("{chunk:X?}");
+            }
+
+            message => error!("Unexpected message, cannot cope: {message:?}"),
         }
     }
 }

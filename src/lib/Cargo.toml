@@ -16,5 +16,6 @@ rand = "*"
 
 tokio = { version = "*", features = ["full"] }
 serde = { version = "*", features = ["derive"] }
+serde-big-array = "*"
 uuid = { version = "*", features = ["v7", "fast-rng", "serde"] }
 bincode = "*"
