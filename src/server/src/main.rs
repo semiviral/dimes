@@ -6,9 +6,13 @@ extern crate anyhow;
 use anyhow::Result;
 use lib::{
     crypto::Key,
-    message::{ping_peer, receive_message, send_chunk, Message, CHUNK_SIZE, MESSAGE_TIMEOUT},
+    message::{
+        ping_peer, receive_chunk, receive_message, send_chunk, send_message, Message, CHUNK_SIZE,
+        MESSAGE_TIMEOUT,
+    },
 };
 use rand::{rngs::OsRng, RngCore};
+use sha2::{Digest, Sha512};
 use std::{collections::BTreeMap, net::SocketAddr, time::Duration};
 use tokio::{
     io::BufStream,
@@ -88,7 +92,42 @@ async fn spawn_peer(
 
     let mut chunk = vec![0u8; CHUNK_SIZE].into_boxed_slice();
     OsRng.fill_bytes(&mut chunk);
-    send_chunk(&mut peer_stream, &peer_key, Uuid::now_v7(), &chunk).await?;
+
+    let mut hasher = Sha512::new();
+    hasher.update(&chunk);
+    let hash1 = hasher.finalize();
+
+    let chunk_id = Uuid::now_v7();
+    send_message(
+        &mut peer_stream,
+        &peer_key,
+        Message::PrepareStore { id: chunk_id },
+        MESSAGE_TIMEOUT,
+        true,
+    )
+    .await?;
+    send_chunk(&mut peer_stream, &peer_key, &chunk).await?;
+
+    send_message(
+        &mut peer_stream,
+        &peer_key,
+        Message::PrepareStock { id: chunk_id },
+        MESSAGE_TIMEOUT,
+        true,
+    )
+    .await?;
+    let recv_chunk = receive_chunk(&mut peer_stream, &peer_key).await?;
+
+    let mut hasher = Sha512::new();
+    hasher.update(&chunk);
+    let hash2 = hasher.finalize();
+
+    hash1.iter().for_each(|b| print!("{b:X}"));
+    print!(" === ");
+    hash2.iter().for_each(|b| print!("{b:X}"));
+    println!("");
+
+    loop {}
 
     event!(
         Level::DEBUG,
@@ -97,6 +136,8 @@ async fn spawn_peer(
         peer.version = %&version,
         peer.chunks = max_chunks
     );
+
+    loop {}
 
     listen_peer(peer_id, peer_ctoken, peer_stream, peer_address, peer_key).await
 }

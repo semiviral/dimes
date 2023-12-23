@@ -137,7 +137,10 @@ pub async fn ping_peer<S: AsyncRead + AsyncWrite + Unpin>(mut stream: S, key: &K
     }
 }
 
-pub async fn receive_chunk<R: AsyncRead + Unpin>(mut reader: R, key: &Key) -> Result<Box<[u8]>> {
+pub async fn receive_chunk<R: AsyncRead + AsyncWrite + Unpin>(
+    mut reader: R,
+    key: &Key,
+) -> Result<Box<[u8]>> {
     let mut chunk = vec![0u8; CHUNK_SIZE].into_boxed_slice();
 
     for empty_part in chunk.chunks_mut(CHUNK_PART_SIZE) {
@@ -160,19 +163,9 @@ pub async fn receive_chunk<R: AsyncRead + Unpin>(mut reader: R, key: &Key) -> Re
 pub async fn send_chunk<W: AsyncWrite + Unpin>(
     mut writer: W,
     key: &Key,
-    id: Uuid,
     chunk: &[u8],
 ) -> Result<()> {
     assert_eq!(chunk.len(), CHUNK_SIZE, "chunk is not the correct size");
-
-    send_message(
-        &mut writer,
-        key,
-        Message::PrepareStore { id },
-        MESSAGE_TIMEOUT,
-        false,
-    )
-    .await?;
 
     for part in chunk.chunks(CHUNK_PART_SIZE) {
         send_message(
