@@ -9,9 +9,9 @@ use anyhow::Result;
 use clap::Parser;
 use lib::{
     crypto::{self, Key},
-    message::{receive_chunk, receive_message, send_message, Message},
+    message::{receive_chunk, receive_message, send_message, Message, MESSAGE_TIMEOUT},
 };
-use redis::aio::Connection;
+use redis::{aio::Connection, AsyncCommands};
 use std::time::Duration;
 use tokio::{
     io::{AsyncRead, AsyncWrite, BufStream},
@@ -42,9 +42,9 @@ async fn main() {
 }
 
 async fn start(args: &cli::Arguments) -> Result<()> {
-    //let redis = connect_redis(&args.db_url).await?;
+    let redis = connect_redis(&args.db_url).await?;
 
-trace!("Attempting to connect to server...");
+    trace!("Attempting to connect to server...");
 
     let (stream, key) = {
         let mut reconnections = 5;
@@ -73,7 +73,7 @@ trace!("Attempting to connect to server...");
         }
     };
 
-    listen_server( stream, key).await?;
+    listen_server(redis, stream, key).await?;
 
     Ok(())
 }
@@ -97,11 +97,19 @@ async fn connect_server(args: &cli::Arguments) -> Result<(BufStream<TcpStream>, 
     trace!("Negotiating ECDH shared secret with server...");
     let key = crypto::ecdh_handshake(&mut stream).await?;
 
-    let Message::Ping { stamp } = receive_message(&mut stream, &key).await? else {
+    let Message::Ping { stamp } = receive_message(&mut stream, &key, MESSAGE_TIMEOUT).await? else {
         bail!("Server started correspondence with unexpected message (expected ping).")
     };
 
-    send_message(&mut stream, &key, Message::Pong { restamp: stamp }).await?;
+    send_message(
+        &mut stream,
+        &key,
+        Message::Pong { restamp: stamp },
+        MESSAGE_TIMEOUT,
+        true,
+    )
+    .await?;
+
     // Send info block to server.
     send_message(
         &mut stream,
@@ -111,6 +119,8 @@ async fn connect_server(args: &cli::Arguments) -> Result<(BufStream<TcpStream>, 
             agent: agent(),
             max_chunks: args.max_chunks,
         },
+        MESSAGE_TIMEOUT,
+        true,
     )
     .await?;
 
@@ -118,19 +128,26 @@ async fn connect_server(args: &cli::Arguments) -> Result<(BufStream<TcpStream>, 
 }
 
 async fn listen_server<S: AsyncRead + AsyncWrite + Unpin>(
-    //_redis: Connection,
+    mut redis: Connection,
     mut stream: S,
     key: Key,
 ) -> Result<()> {
     loop {
-        match receive_message(&mut stream, &key).await? {
+        match receive_message(&mut stream, &key, None).await? {
             Message::Ping { stamp } => {
-                send_message(&mut stream, &key, Message::Pong { restamp: stamp }).await?
+                send_message(
+                    &mut stream,
+                    &key,
+                    Message::Pong { restamp: stamp },
+                    MESSAGE_TIMEOUT,
+                    true,
+                )
+                .await?
             }
 
-            Message::PrepareStore { id: _ } => {
+            Message::PrepareStore { id } => {
                 let chunk = receive_chunk(&mut stream, &key).await?;
-                info!("{chunk:X?}");
+                redis.hset(id.as_u64_pair(), "blob", chunk.as_ref()).await?;
             }
 
             message => error!("Unexpected message, cannot cope: {message:?}"),

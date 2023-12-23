@@ -4,14 +4,12 @@ use crate::crypto::{Key, Nonce};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_big_array::BigArray;
-use tokio::{
-    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
-    time::timeout,
-};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tracing::Level;
 use uuid::Uuid;
 
-pub const MESSAGE_TIMEOUT: Duration = Duration::from_secs(10);
+pub const MESSAGE_TIMEOUT: Option<Duration> = Some(Duration::from_secs(3));
+
 pub const CHUNK_PARTS: usize = 2_000;
 pub const CHUNK_PART_SIZE: usize = 256;
 pub const CHUNK_SIZE: usize = CHUNK_PART_SIZE * CHUNK_PARTS;
@@ -33,10 +31,10 @@ pub enum Message {
     },
 
     PrepareStore {
-        id: Uuid
+        id: Uuid,
     },
 
-    PrepareReceive {
+    PrepareStock {
         id: Uuid,
     },
 
@@ -49,11 +47,14 @@ pub async fn send_message<W: AsyncWrite + Unpin>(
     writer: W,
     key: &Key,
     message: Message,
+    timeout: Option<Duration>,
+    flush: bool,
 ) -> Result<()> {
     async fn send_message_inner<W: AsyncWrite + Unpin>(
         mut writer: W,
         key: &Key,
         message: Message,
+        flush: bool,
     ) -> Result<()> {
         let message_bytes = bincode::serialize(&message)?;
         let (nonce, encrypted_data) = crate::crypto::encrypt(key, &message_bytes)?;
@@ -64,46 +65,27 @@ pub async fn send_message<W: AsyncWrite + Unpin>(
 
         event!(Level::TRACE, raw = ?message, crypted_len = %encrypted_data.len(), nonce = %format!("{nonce:X?}"));
 
-        writer.flush().await?;
-
-        Ok(())
-    }
-
-    timeout(MESSAGE_TIMEOUT, send_message_inner(writer, key, message)).await?
-}
-
-#[instrument(level = "trace", skip(writer, key, messages))]
-pub async fn send_messages<W: AsyncWrite + Unpin>(
-    writer: W,
-    key: &Key,
-    messages: impl Iterator<Item = Message>,
-) -> Result<()> {
-    async fn send_messages_inner<W: AsyncWrite + Unpin>(
-        mut writer: W,
-        key: &Key,
-        messages: impl Iterator<Item = Message>,
-    ) -> Result<()> {
-        for message in messages {
-            let message_bytes = bincode::serialize(&message)?;
-            let (nonce, encrypted_data) = crate::crypto::encrypt(key, &message_bytes)?;
-
-            writer.write_u32_le(encrypted_data.len() as u32).await?;
-            writer.write_all(&nonce).await?;
-            writer.write_all(&encrypted_data).await?;
-
-            event!(Level::TRACE, raw = ?message, crypted_len = %encrypted_data.len(), nonce = %format!("{nonce:X?}"));
+        if flush {
+            writer.flush().await?;
         }
 
-        writer.flush().await?;
-
         Ok(())
     }
 
-    timeout(MESSAGE_TIMEOUT, send_messages_inner(writer, key, messages)).await?
+    let send_message = send_message_inner(writer, key, message, flush);
+    match timeout {
+        Some(timeout) => tokio::time::timeout(timeout, send_message).await?,
+
+        None => send_message.await,
+    }
 }
 
 #[instrument(level = "trace", skip(reader, key))]
-pub async fn receive_message<R: AsyncRead + Unpin>(reader: R, key: &Key) -> Result<Message> {
+pub async fn receive_message<R: AsyncRead + Unpin>(
+    reader: R,
+    key: &Key,
+    timeout: Option<Duration>,
+) -> Result<Message> {
     pub async fn receive_message_inner<R: AsyncRead + Unpin>(
         mut reader: R,
         key: &Key,
@@ -124,31 +106,44 @@ pub async fn receive_message<R: AsyncRead + Unpin>(reader: R, key: &Key) -> Resu
         Ok(message)
     }
 
-    timeout(MESSAGE_TIMEOUT, receive_message_inner(reader, key)).await?
+    let receive_message = receive_message_inner(reader, key);
+    match timeout {
+        Some(timeout) => tokio::time::timeout(timeout, receive_message).await?,
+
+        None => receive_message.await,
+    }
 }
 
 pub async fn ping_peer<S: AsyncRead + AsyncWrite + Unpin>(mut stream: S, key: &Key) -> Result<()> {
     let stamp = rand::random();
-    send_message(&mut stream, key, Message::Ping { stamp }).await?;
-    let Message::Pong { restamp } = receive_message(&mut stream, key).await? else {
+    send_message(
+        &mut stream,
+        key,
+        Message::Ping { stamp },
+        MESSAGE_TIMEOUT,
+        true,
+    )
+    .await?;
+
+    let Message::Pong { restamp } = receive_message(&mut stream, key, MESSAGE_TIMEOUT).await?
+    else {
         bail!("Peer responded with incorrect message type (expected Pong).");
     };
 
     if restamp == stamp {
         Ok(())
     } else {
-        bail!("Peer failed to restamp the ping correctly.")
+        bail!("peer failed to restamp the ping correctly.")
     }
 }
 
 pub async fn receive_chunk<R: AsyncRead + Unpin>(mut reader: R, key: &Key) -> Result<Box<[u8]>> {
-    // TODO define a fixed chunk size to make this cacheable
     let mut chunk = vec![0u8; CHUNK_SIZE].into_boxed_slice();
 
     for empty_part in chunk.chunks_mut(CHUNK_PART_SIZE) {
         assert!(empty_part.len() == CHUNK_PART_SIZE);
 
-        match receive_message(&mut reader, key).await? {
+        match receive_message(&mut reader, key, MESSAGE_TIMEOUT).await? {
             Message::ChunkPart(part) => {
                 empty_part.copy_from_slice(&part);
             }
@@ -168,8 +163,29 @@ pub async fn send_chunk<W: AsyncWrite + Unpin>(
     id: Uuid,
     chunk: &[u8],
 ) -> Result<()> {
-    send_message(&mut writer, key, Message::PrepareStore { id }).await?;
-    send_messages(&mut writer, key, chunk.chunks(CHUNK_PART_SIZE).map(|part| Message::ChunkPart(part.try_into().unwrap()))).await?;
+    assert_eq!(chunk.len(), CHUNK_SIZE, "chunk is not the correct size");
+
+    send_message(
+        &mut writer,
+        key,
+        Message::PrepareStore { id },
+        MESSAGE_TIMEOUT,
+        false,
+    )
+    .await?;
+
+    for part in chunk.chunks(CHUNK_PART_SIZE) {
+        send_message(
+            &mut writer,
+            key,
+            Message::ChunkPart(part.try_into().unwrap()),
+            MESSAGE_TIMEOUT,
+            false,
+        )
+        .await?;
+    }
+
+    writer.flush().await?;
 
     Ok(())
 }

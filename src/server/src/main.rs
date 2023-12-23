@@ -6,7 +6,7 @@ extern crate anyhow;
 use anyhow::Result;
 use lib::{
     crypto::Key,
-    message::{ping_peer, receive_message, Message, CHUNK_SIZE, send_chunk},
+    message::{ping_peer, receive_message, send_chunk, Message, CHUNK_SIZE, MESSAGE_TIMEOUT},
 };
 use rand::{rngs::OsRng, RngCore};
 use std::{collections::BTreeMap, net::SocketAddr, time::Duration};
@@ -81,7 +81,7 @@ async fn spawn_peer(
         agent,
         version,
         max_chunks,
-    } = receive_message(&mut peer_stream, &peer_key).await?
+    } = receive_message(&mut peer_stream, &peer_key, MESSAGE_TIMEOUT).await?
     else {
         bail!("expected Info message")
     };
@@ -89,7 +89,6 @@ async fn spawn_peer(
     let mut chunk = vec![0u8; CHUNK_SIZE].into_boxed_slice();
     OsRng.fill_bytes(&mut chunk);
     send_chunk(&mut peer_stream, &peer_key, Uuid::now_v7(), &chunk).await?;
-    
 
     event!(
         Level::DEBUG,
@@ -98,8 +97,6 @@ async fn spawn_peer(
         peer.version = %&version,
         peer.chunks = max_chunks
     );
-
-    
 
     listen_peer(peer_id, peer_ctoken, peer_stream, peer_address, peer_key).await
 }
@@ -118,7 +115,7 @@ async fn listen_peer(
             _ = ctoken.cancelled() => break 'a,
             _ = sleep(PING_WAIT) => ping_peer(&mut stream, &key).await,
 
-            message = receive_message(&mut stream, &key) => {
+            message = receive_message(&mut stream, &key, None) => {
                 match message {
                     Ok(message) => {
                        todo!("handle {message:?}")
