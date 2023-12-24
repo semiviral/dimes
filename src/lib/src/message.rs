@@ -114,7 +114,7 @@ pub async fn receive_message<R: AsyncRead + Unpin>(
     }
 }
 
-pub async fn ping_peer<S: AsyncRead + AsyncWrite + Unpin>(mut stream: S, key: &Key) -> Result<()> {
+pub async fn ping_pong<S: AsyncRead + AsyncWrite + Unpin>(mut stream: S, key: &Key) -> Result<()> {
     let stamp = rand::random();
     send_message(
         &mut stream,

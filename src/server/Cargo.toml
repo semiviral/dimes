@@ -15,6 +15,9 @@ clap = { version = "*", features = ["derive"] }
 tokio = { version = "*", features = ["full"] }
 tokio-util = "*"
 
+axum = { version = "*", features = ["tracing"] }
+serde = "*"
+
 uuid = { version = "*", features = ["v7", "fast-rng"] }
 rand = "*"
 sha2 = "*"
