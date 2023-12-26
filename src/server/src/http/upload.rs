@@ -1,8 +1,9 @@
+use anyhow::Result;
 use axum::{
     extract::Query,
     http::{HeaderMap, StatusCode},
     routing::{patch, put},
-    Router,
+    Router, response::Response,
 };
 use serde::Deserialize;
 
@@ -22,6 +23,7 @@ pub enum UploadKind {
     Resumable,
 }
 
-async fn upload_put(headers: HeaderMap, kind: Query<UploadPut>) -> StatusCode {
-    StatusCode::OK
+async fn upload_put(headers: HeaderMap, kind: Query<UploadPut>) -> Response {
+    Response::builder().
 }
+

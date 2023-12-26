@@ -18,6 +18,7 @@ tokio-util = "*"
 
 axum = { version = "*", features = ["tracing"] }
 serde = "*"
+chrono = "*"
 
 uuid = { version = "*", features = ["v7", "fast-rng"] }
 rand = "*"

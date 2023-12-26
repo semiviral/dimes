@@ -15,6 +15,11 @@ use uuid::Uuid;
 
 static PEER_TOKENS: Mutex<BTreeMap<Uuid, CancellationToken>> = Mutex::const_new(BTreeMap::new());
 
+
+fn agent() -> String {
+    format!("{}/{}", String::from("Dimese"), env!("CARGO_PKG_VERSION"))
+}
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt()
