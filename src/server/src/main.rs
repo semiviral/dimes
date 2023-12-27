@@ -3,18 +3,21 @@ extern crate tracing;
 #[macro_use]
 extern crate anyhow;
 
+mod cfg;
 mod http;
+mod storage;
 mod tcp;
 
 use anyhow::Result;
-use config::Config;
-use std::{collections::BTreeMap, net::SocketAddr};
+use once_cell::sync::Lazy;
+use std::{collections::BTreeMap, path::PathBuf};
 use tokio::{net::TcpListener, sync::Mutex};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-static PEER_TOKENS: Mutex<BTreeMap<Uuid, CancellationToken>> = Mutex::const_new(BTreeMap::new());
+static TEMP_DIR: Lazy<PathBuf> = Lazy::new(std::env::temp_dir);
 
+static PEER_TOKENS: Mutex<BTreeMap<Uuid, CancellationToken>> = Mutex::const_new(BTreeMap::new());
 
 fn agent() -> String {
     format!("{}/{}", String::from("Dimese"), env!("CARGO_PKG_VERSION"))
@@ -34,12 +37,10 @@ async fn main() {
 }
 
 async fn start() -> Result<()> {
-    let config = load_config()?;
-
-    let shard_listener = TcpListener::bind(config.get::<SocketAddr>("shard.bind")?).await?;
+    let shard_listener = TcpListener::bind(cfg::get().bind.shard).await?;
     debug!("Bound shard listener on {}.", shard_listener.local_addr()?);
 
-    let http_listener = TcpListener::bind(config.get::<SocketAddr>("http.bind")?).await?;
+    let http_listener = TcpListener::bind(cfg::get().bind.http).await?;
     debug!("Bound HTTP listener on {}.", http_listener.local_addr()?);
 
     let ctoken = CancellationToken::new();
@@ -52,10 +53,8 @@ async fn start() -> Result<()> {
     }
 }
 
-fn load_config() -> Result<Config> {
-    let config = config::Config::builder()
-        .add_source(config::Environment::with_prefix("DIMESE").separator("_"))
-        .build()?;
+async fn connect_db() -> Result<()> {
+    let (client, connection) = tokio_postgres::connect("config", tokio_postgres::NoTls).await?;
 
-    Ok(config)
+    
 }
