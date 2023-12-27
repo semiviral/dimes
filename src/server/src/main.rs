@@ -13,6 +13,7 @@ use once_cell::sync::Lazy;
 use std::{collections::BTreeMap, path::PathBuf};
 use tokio::{net::TcpListener, sync::Mutex};
 use tokio_util::sync::CancellationToken;
+use tracing::Level;
 use uuid::Uuid;
 
 static TEMP_DIR: Lazy<PathBuf> = Lazy::new(std::env::temp_dir);
@@ -37,11 +38,31 @@ async fn main() {
 }
 
 async fn start() -> Result<()> {
-    let shard_listener = TcpListener::bind(cfg::get().bind.shard).await?;
-    debug!("Bound shard listener on {}.", shard_listener.local_addr()?);
+    connect_db().await?;
+    listen().await?;
 
-    let http_listener = TcpListener::bind(cfg::get().bind.http).await?;
-    debug!("Bound HTTP listener on {}.", http_listener.local_addr()?);
+    Ok(())
+}
+
+#[instrument]
+async fn connect_db() -> Result<()> {
+    event!(Level::DEBUG, url = &cfg::get().db.url);
+
+    let (_client, _connection) =
+        tokio_postgres::connect(&cfg::get().db.url, tokio_postgres::NoTls).await?;
+
+    todo!()
+}
+
+#[instrument]
+async fn listen() -> Result<()> {
+    let shard_bind = cfg::get().bind.shard;
+    event!(Level::DEBUG, ip = %shard_bind.ip(), port = shard_bind.port());
+    let shard_listener = TcpListener::bind(shard_bind).await?;
+
+    let http_bind = cfg::get().bind.http;
+    event!(Level::DEBUG, ip = %http_bind.ip(), port = http_bind.port());
+    let http_listener = TcpListener::bind(http_bind).await?;
 
     let ctoken = CancellationToken::new();
 
@@ -51,10 +72,4 @@ async fn start() -> Result<()> {
 
         _ = ctoken.cancelled() => { Ok(()) }
     }
-}
-
-async fn connect_db() -> Result<()> {
-    let (client, connection) = tokio_postgres::connect("config", tokio_postgres::NoTls).await?;
-
-    
 }
