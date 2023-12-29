@@ -16,29 +16,32 @@ use uuid::Uuid;
 
 pub async fn accept_connections(listener: TcpListener, ctoken: &CancellationToken) -> Result<()> {
     loop {
-        trace!("Server is waiting to accept a socket.");
+        trace!("Waiting for new shard.");
         let (peer_socket, peer_address) = listener.accept().await?;
         let peer_id = Uuid::now_v7();
         let peer_ctoken = ctoken.child_token();
-        debug!("Accepted socket [{peer_id}]: {peer_address}");
 
-        tokio::spawn(
-            async move {
-                spawn_peer(peer_id, peer_ctoken, peer_socket, peer_address)
+        event!(Level::DEBUG, ip = %peer_address.ip(), port = peer_address.port(), id = %peer_id);
+
+        tokio::spawn(async move {
+            let (peer_stream, peer_key, peer_agent) =
+                spawn_peer(peer_id, peer_socket, &peer_ctoken)
+                    .instrument(span!(Level::DEBUG, "spawn peer", id = %peer_id))
                     .await
-                    .expect("failed spawning peer")
-            }
-            .instrument(info_span!("peer", peer_id = %peer_id)),
-        );
+                    .expect("failed spawning peer");
+
+            listen_peer(peer_id, peer_ctoken, peer_stream, peer_address, peer_key)
+                .instrument(span!(Level::DEBUG, "peer", id = %peer_id, agent = %peer_agent))
+                .await
+        });
     }
 }
 
 async fn spawn_peer(
     peer_id: Uuid,
-    peer_ctoken: CancellationToken,
     peer_socket: TcpStream,
-    peer_address: SocketAddr,
-) -> Result<()> {
+    peer_ctoken: &CancellationToken,
+) -> Result<(BufStream<TcpStream>, Key, String)> {
     let mut peer_tokens = PEER_TOKENS.lock().await;
     peer_tokens.insert(peer_id, peer_ctoken.clone());
     drop(peer_tokens);
@@ -49,8 +52,6 @@ async fn spawn_peer(
         .map_err(|err| anyhow!("[{peer_id}] Error during handshake: {err:?}"))?;
 
     ping_pong(&mut peer_stream, &peer_key).await?;
-
-    debug!("[{peer_id}] Peer correctly restamped initial ping.");
 
     let Message::Info {
         agent,
@@ -69,7 +70,10 @@ async fn spawn_peer(
         peer.chunks = max_chunks
     );
 
-    listen_peer(peer_id, peer_ctoken, peer_stream, peer_address, peer_key).await
+    debug!("Connected.");
+
+    // TODO use a string cache for the agent infos
+    Ok((peer_stream, peer_key, format!("{agent}/{version}")))
 }
 
 async fn listen_peer(

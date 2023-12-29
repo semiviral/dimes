@@ -17,6 +17,7 @@ pub const CHUNK_SIZE: usize = CHUNK_PART_SIZE * CHUNK_PARTS;
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Message {
+    // TODO remove stamps from pings, use a Hello for initial auth
     Ping {
         stamp: [u8; 16],
     },
@@ -63,7 +64,11 @@ pub async fn send_message<W: AsyncWrite + Unpin>(
         writer.write_all(&nonce).await?;
         writer.write_all(&encrypted_data).await?;
 
-        event!(Level::TRACE, raw = ?message, crypted_len = %encrypted_data.len(), nonce = %format!("{nonce:X?}"));
+        event!(Level::TRACE,
+            raw = ?message,
+            crypted_len = %encrypted_data.len(),
+            nonce = %format!("{nonce:X?}")
+        );
 
         if flush {
             writer.flush().await?;

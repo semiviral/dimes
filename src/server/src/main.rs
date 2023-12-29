@@ -38,13 +38,12 @@ async fn main() {
 }
 
 async fn start() -> Result<()> {
-    connect_db().await?;
+    //connect_db().await?;
     listen().await?;
 
     Ok(())
 }
 
-#[instrument]
 async fn connect_db() -> Result<()> {
     event!(Level::DEBUG, url = &cfg::get().db.url);
 
@@ -54,7 +53,6 @@ async fn connect_db() -> Result<()> {
     todo!()
 }
 
-#[instrument]
 async fn listen() -> Result<()> {
     let shard_bind = cfg::get().bind.shard;
     event!(Level::DEBUG, ip = %shard_bind.ip(), port = shard_bind.port());
