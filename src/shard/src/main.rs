@@ -3,28 +3,44 @@ extern crate tracing;
 #[macro_use]
 extern crate anyhow;
 
+mod api;
+mod cfg;
 mod cli;
 
 use anyhow::Result;
 use clap::Parser;
+
 use lib::{
     crypto::{self, Key},
     message::{receive_chunk, receive_message, send_chunk, send_message, Message, MESSAGE_TIMEOUT},
+    ConnectInfo, ShardInfo,
 };
+use once_cell::sync::Lazy;
 use redis::{aio::Connection, AsyncCommands};
+use reqwest::header::HeaderMap;
 use std::time::Duration;
 use tokio::{
     io::{AsyncRead, AsyncWrite, BufStream},
     net::TcpStream,
 };
 
-fn version() -> String {
-    String::from(env!("CARGO_PKG_VERSION"))
+fn agent() -> String {
+    format!("dimese-shard/{}", env!("CARGO_PKG_VERSION"))
 }
 
-fn agent() -> String {
-    String::from("dimese-shard")
+fn info() -> (ConnectInfo, ShardInfo) {
+    (
+        ConnectInfo { agent: agent() },
+        ShardInfo { max_chunks: 128 },
+    )
 }
+
+static HTTP_CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
+    reqwest::Client::builder()
+        .use_native_tls()
+        .build()
+        .expect("failed to initialize HTTP client")
+});
 
 #[tokio::main]
 async fn main() {
@@ -35,9 +51,32 @@ async fn main() {
         .with_max_level(tracing::Level::TRACE)
         .init();
 
-    match start(&args).await {
-        Ok(()) => info!("Shard has reached safe shutdown point."),
-        Err(err) => error!("Shard has encountered an unrecoverable error: {err:?}"),
+    tokio::try_join!(api::start(), announce()).unwrap();
+
+    std::process::exit(0)
+}
+
+async fn announce() -> Result<()> {
+    let response = HTTP_CLIENT
+        .post("http://127.0.0.1:3089/shards/register")
+        .header("Content-Type", "application/json")
+        .body(serde_json::to_string(&info())?)
+        .send()
+        .await?;
+
+    match response.status() {
+        reqwest::StatusCode::CREATED => {
+            let body = response.bytes().await?;
+            let connect_info = serde_json::from_slice::<ConnectInfo>(&body)?;
+
+            info!("Server connection info:\n{connect_info:#?}");
+
+            Ok(())
+        }
+
+        status => {
+            bail!("Register request failed with status code: {:?}", status)
+        }
     }
 }
 
@@ -115,7 +154,7 @@ async fn connect_server(args: &cli::Arguments) -> Result<(BufStream<TcpStream>, 
         &mut stream,
         &key,
         Message::Info {
-            version: version(),
+            version: String::from("Asdasdasd"),
             agent: agent(),
             max_chunks: args.max_chunks,
         },
