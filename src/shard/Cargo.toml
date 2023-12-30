@@ -10,7 +10,6 @@ lib = { path = "../lib" }
 anyhow = "*"
 tracing = "*"
 tracing-subscriber = { version = "*", features = ["parking_lot"] }
-clap = { version = "*", features = ["derive"] }
 config = "*"
 tokio = { version = "*", features = ["full"] }
 serde = { version = "*", features = ["derive"] }

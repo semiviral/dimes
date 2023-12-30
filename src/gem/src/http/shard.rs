@@ -1,11 +1,11 @@
 use axum::{body::Body, http::StatusCode, response::Response, routing::post, Json, Router};
-use lib::{ConnectInfo, ShardInfo};
+use lib::{api::shard, ConnectInfo};
 
 pub fn routes() -> Router {
-    Router::new().route("/register", post(_post))
+    Router::new().route("/shard/register", post(register))
 }
 
-async fn _post(connect_info: Json<(ConnectInfo, ShardInfo)>) -> (StatusCode, Response) {
+async fn register(connect_info: Json<(ConnectInfo, shard::Info)>) -> (StatusCode, Response) {
     println!("{connect_info:?}");
 
     let response = Response::builder()
