@@ -6,17 +6,29 @@ extern crate anyhow;
 mod api;
 mod cfg;
 
-use anyhow::Result;
-use lib::{api::shard, ConnectInfo, Token};
+use std::future::IntoFuture;
+
+use lib::{
+    api::{response_json, shard},
+    token::{Server, Shard, Token},
+    ConnectInfo,
+};
 use once_cell::sync::{Lazy, OnceCell};
+use tokio_util::sync::CancellationToken;
+
+static SHARD_TOKEN: Lazy<Token<Shard>> = Lazy::new(Token::generate);
+static SERVER_TOKEN: OnceCell<Token<Server>> = OnceCell::new();
 
 fn agent() -> String {
     format!("dimese-shard/{}", env!("CARGO_PKG_VERSION"))
 }
 
-fn info() -> (ConnectInfo, shard::Info) {
+fn info() -> (ConnectInfo<Shard>, shard::Info) {
     (
-        ConnectInfo { agent: agent() },
+        ConnectInfo {
+            agent: agent(),
+            token: *SHARD_TOKEN,
+        },
         shard::Info {
             max_chunks: 128,
             endpoint: String::new(),
@@ -24,14 +36,14 @@ fn info() -> (ConnectInfo, shard::Info) {
     )
 }
 
+static CTOKEN: Lazy<CancellationToken> = Lazy::new(CancellationToken::new);
+
 static HTTP_CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
     reqwest::Client::builder()
         .use_native_tls()
         .build()
         .expect("failed to initialize HTTP client")
 });
-
-static TOKEN: OnceCell<Token> = OnceCell::new();
 
 #[tokio::main]
 async fn main() {
@@ -42,31 +54,28 @@ async fn main() {
         .with_max_level(tracing::Level::TRACE)
         .init();
 
-    tokio::try_join!(api::start(), announce()).unwrap();
+    let api_join = tokio::spawn(api::start());
 
-    std::process::exit(0)
-}
-
-async fn announce() -> Result<()> {
     let response = HTTP_CLIENT
-        .post("http://127.0.0.1:3089/shards/register")
-        .header("Content-Type", "application/json")
-        .body(serde_json::to_string(&info())?)
+        .post("http://127.0.0.1:3089/api/shard/register")
+        .json(&info())
         .send()
-        .await?;
+        .await
+        .expect("request failed");
 
-    match response.status() {
-        reqwest::StatusCode::CREATED => {
-            let body = response.bytes().await?;
-            let connect_info = serde_json::from_slice::<ConnectInfo>(&body)?;
+    let connect_info = response_json::<ConnectInfo<Server>>(response)
+        .await
+        .expect("unexpected response");
+    info!("Server connection info:\n{connect_info:#?}");
+    SERVER_TOKEN
+        .set(connect_info.token)
+        .expect("token has already been set (this is unexpected).");
 
-            info!("Server connection info:\n{connect_info:#?}");
+    tokio::select! {
+        _ = CTOKEN.cancelled() => {}
 
-            Ok(())
-        }
-
-        status => {
-            bail!("Register request failed with status code: {:?}", status)
+        result = api_join.into_future() => {
+            result.expect("join error").expect("api error");
         }
     }
 }

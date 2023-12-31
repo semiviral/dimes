@@ -18,3 +18,5 @@ serde = { version = "*", features = ["derive"] }
 serde-big-array = "*"
 uuid = { version = "*", features = ["v7", "fast-rng", "serde"] }
 bincode = "*"
+reqwest = { version = "*", features = ["json", "native-tls"] }
+serde_json = "*"

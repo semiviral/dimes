@@ -4,16 +4,15 @@ extern crate anyhow;
 extern crate tracing;
 
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 pub mod api;
+pub mod error_code;
+pub mod token;
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct ConnectInfo {
+pub struct ConnectInfo<K: token::Kind> {
     pub agent: String,
+    pub token: token::Token<K>,
 }
 
-
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Token(Uuid);
+pub type ChunkHash = [u8; 64];

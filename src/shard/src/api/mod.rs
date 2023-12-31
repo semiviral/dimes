@@ -4,9 +4,11 @@ use tokio::net::TcpListener;
 mod routes;
 
 pub async fn start() -> Result<()> {
-    let listener = TcpListener::bind(crate::cfg::get().bind).await?;
-
-    axum::serve(listener, routes::router()).await?;
+    axum::serve(
+        TcpListener::bind(crate::cfg::get().bind).await?,
+        routes::router(),
+    )
+    .await?;
 
     Ok(())
 }

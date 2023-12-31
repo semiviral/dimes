@@ -1,5 +1,5 @@
 [package]
-name = "gem"
+name = "server"
 version = "0.1.0"
 edition = "2021"
 
@@ -21,7 +21,7 @@ tokio-postgres = { version = "*", features = [
     "with-uuid-1",
 ] }
 axum = { version = "*", features = ["tracing"] }
-reqwest = { version = "*", features = ["native-tls"] }
+reqwest = { version = "*", features = ["json", "native-tls"] }
 chrono = "*"
 serde = { version = "*", features = ["derive"] }
 serde_json = "*"

@@ -12,10 +12,11 @@ tracing = "*"
 tracing-subscriber = { version = "*", features = ["parking_lot"] }
 config = "*"
 tokio = { version = "*", features = ["full"] }
+tokio-util = "*"
 serde = { version = "*", features = ["derive"] }
 serde_json = "*"
 axum = { version = "*", features = ["tracing"] }
-reqwest = { version = "*", features = ["native-tls"] }
+reqwest = { version = "*", features = ["json", "native-tls"] }
 once_cell = "*"
 uuid = { version = "*", features = ["v7", "fast-rng"] }
 redis = { version = "*", default-features = false, features = [

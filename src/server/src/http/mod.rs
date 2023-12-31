@@ -8,7 +8,13 @@ use tokio_util::sync::CancellationToken;
 pub async fn accept_connections(listener: TcpListener, ctoken: &CancellationToken) -> Result<()> {
     let routes = Router::new().nest("/api", shard::routes());
 
-    axum::serve(listener, routes).await?;
+    tokio::select! {
+        result = async { axum::serve(listener, routes).await } => {
+            result?;
 
-    Ok(())
+            Ok(())
+        }
+
+        _ = ctoken.cancelled() => { Ok(()) }
+    }
 }

@@ -7,28 +7,17 @@ mod cfg;
 mod http;
 
 use anyhow::Result;
-use once_cell::sync::Lazy;
-use std::{collections::BTreeMap, path::PathBuf};
-use tokio::{net::TcpListener, sync::Mutex};
+use tokio::net::TcpListener;
 use tokio_postgres::{tls::NoTlsStream, NoTls};
 use tokio_util::sync::CancellationToken;
 use tracing::Level;
-use uuid::Uuid;
-
-static TEMP_DIR: Lazy<PathBuf> = Lazy::new(std::env::temp_dir);
-
-static PEER_TOKENS: Mutex<BTreeMap<Uuid, CancellationToken>> = Mutex::const_new(BTreeMap::new());
 
 fn agent() -> String {
     format!(
         "{}/{}",
-        String::from("dimese-gem"),
+        String::from("dimese-server"),
         env!("CARGO_PKG_VERSION")
     )
-}
-
-fn info() -> lib::ConnectInfo {
-    lib::ConnectInfo { agent: agent() }
 }
 
 #[tokio::main]
@@ -50,8 +39,8 @@ async fn start() -> Result<()> {
     let ctoken = CancellationToken::new();
 
     tokio::select! {
-        result = listen_http(&ctoken) => { result }
         _ = ctoken.cancelled() => { Ok(()) }
+        result = listen_http(&ctoken) => { result }
     }
 }
 
