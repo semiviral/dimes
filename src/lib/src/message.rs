@@ -40,7 +40,7 @@ pub enum Message {
     },
 
     #[serde(with = "BigArray")]
-    ChunkPart([u8; 256]),
+    ChunkPart([u8; 512]),
 }
 
 #[instrument(level = "trace", skip(writer, key, message))]

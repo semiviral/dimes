@@ -3,7 +3,7 @@ mod media;
 pub mod response;
 
 use anyhow::Result;
-use axum::{http::StatusCode, response::Response, routing::get, Router};
+use axum::{ Router};
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 
