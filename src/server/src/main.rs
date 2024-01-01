@@ -3,8 +3,8 @@ extern crate tracing;
 #[macro_use]
 extern crate anyhow;
 
+mod api;
 mod cfg;
-mod http;
 mod storage;
 mod tcp;
 
@@ -45,10 +45,10 @@ async fn start() -> Result<()> {
 }
 
 async fn connect_db() -> Result<()> {
-    event!(Level::DEBUG, url = &cfg::get().db.url);
+    // event!(Level::DEBUG, url = &cfg::get().db.url);
 
-    let (_client, _connection) =
-        tokio_postgres::connect(&cfg::get().db.url, tokio_postgres::NoTls).await?;
+    // let (_client, _connection) =
+    //     tokio_postgres::connect(&cfg::get().db.url, tokio_postgres::NoTls).await?;
 
     todo!()
 }
@@ -66,7 +66,7 @@ async fn listen() -> Result<()> {
 
     tokio::select! {
         _ = tcp::accept_connections(shard_listener, &ctoken) => { std::process::exit(-100) }
-        _ = http::accept_connections(http_listener, &ctoken) => { std::process::exit(-200) }
+        _ = api::accept_connections(http_listener, &ctoken) => { std::process::exit(-200) }
 
         _ = ctoken.cancelled() => { Ok(()) }
     }

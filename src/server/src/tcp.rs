@@ -83,7 +83,7 @@ async fn listen_peer(
     _address: SocketAddr,
     key: Key,
 ) -> Result<()> {
-    const PING_WAIT: Duration = Duration::from_secs(10);
+    const PING_WAIT: Duration = Duration::from_secs(30);
 
     'a: loop {
         tokio::select! {

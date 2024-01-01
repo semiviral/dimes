@@ -17,7 +17,7 @@ tokio = { version = "*", features = ["full"] }
 tokio-util = "*"
 once_cell = "*"
 
-axum = { version = "*", features = ["tracing"] }
+axum = { version = "*", features = ["tracing", "http2", "multipart"] }
 chrono = "*"
 serde = { version = "*", features = ["derive"] }
 serde_json = "*"
