@@ -5,7 +5,7 @@ use std::net::SocketAddr;
 #[derive(Debug, Deserialize)]
 pub struct Cfg {
     pub bind: Bind,
-    //pub db: Db,
+    pub db: Db,
 }
 
 #[derive(Debug, Deserialize)]

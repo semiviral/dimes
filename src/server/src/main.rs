@@ -2,6 +2,8 @@
 extern crate tracing;
 #[macro_use]
 extern crate anyhow;
+#[macro_use]
+extern crate sqlx;
 
 mod api;
 mod cfg;
@@ -24,6 +26,8 @@ fn agent() -> String {
     format!("{}/{}", String::from("Dimese"), env!("CARGO_PKG_VERSION"))
 }
 
+static MIGRATOR: sqlx::migrate::Migrator = migrate!();
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt()
@@ -38,17 +42,17 @@ async fn main() {
 }
 
 async fn start() -> Result<()> {
-    //connect_db().await?;
+    connect_db().await?;
     listen().await?;
 
     Ok(())
 }
 
 async fn connect_db() -> Result<()> {
-    // event!(Level::DEBUG, url = &cfg::get().db.url);
+    let connect_str = &cfg::get().db.url;
 
-    // let (_client, _connection) =
-    //     tokio_postgres::connect(&cfg::get().db.url, tokio_postgres::NoTls).await?;
+    let pgpool = sqlx::PgPool::connect(connect_str).await?;
+    MIGRATOR.run(&pgpool).await?;
 
     todo!()
 }

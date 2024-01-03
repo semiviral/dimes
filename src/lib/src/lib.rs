@@ -6,7 +6,7 @@ extern crate tracing;
 pub mod crypto;
 pub mod message;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, serde::Deserialize)]
 struct VideoMetadata {
-    format: String // TODO create format type
+    format: String, // TODO create format type
 }

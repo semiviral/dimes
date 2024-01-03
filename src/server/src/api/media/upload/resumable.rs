@@ -1,4 +1,4 @@
-use axum::{extract::Query, http::StatusCode, response::Response, routing::post, Router, Json};
+use axum::{extract::Query, http::StatusCode, response::Response, routing::post, Json, Router};
 use serde::Deserialize;
 
 pub fn routes() -> Router {
@@ -10,16 +10,15 @@ struct Params {
     size: u64,
 }
 
+// TODO generalize this
 #[derive(Debug, Deserialize)]
 struct RequestMetadata {
     media_name: String,
 }
 
-#[derive(Debug, Deserialize)]
-struct VideoMetadata {
-    format: String // TODO create format type
-}
-
-async fn resumable(query: Query<Params>, metadata: Json<RequestMetadata>) -> (StatusCode, Response) {
-    
+async fn resumable(
+    query: Query<Params>,
+    metadata: Json<RequestMetadata>,
+) -> (StatusCode, Response) {
+    todo!()
 }
