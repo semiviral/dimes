@@ -11,7 +11,7 @@ anyhow = "*"
 tracing = "*"
 tracing-subscriber = { version = "*", features = ["parking_lot"] }
 clap = { version = "*", features = ["derive"] }
-config = { version = "*", features = ["toml"] }
+config = "*"
 
 tokio = { version = "*", features = ["full"] }
 tokio-util = "*"

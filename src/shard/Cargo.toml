@@ -10,16 +10,10 @@ lib = { path = "../lib" }
 anyhow = "*"
 tracing = "*"
 tracing-subscriber = { version = "*", features = ["parking_lot"] }
-clap = { version = "*", features = ["derive"] }
+config = "*"
 
 tokio = { version = "*", features = ["full"] }
 serde = { version = "*", features = ["derive"] }
 
 once_cell = "*"
 uuid = { version = "*", features = ["v7", "fast-rng"] }
-redis = { version = "*", default-features = false, features = [
-    "acl",
-    "aio",
-    "ahash",
-    "tokio-comp",
-] }

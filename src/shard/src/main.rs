@@ -3,18 +3,16 @@ extern crate tracing;
 #[macro_use]
 extern crate anyhow;
 
-mod cli;
+mod cfg;
 
 use anyhow::Result;
-use clap::Parser;
 use lib::{
-    crypto::{self, Key},
+    crypto::Key,
     message::{receive_chunk, receive_message, send_chunk, send_message, Message, MESSAGE_TIMEOUT},
 };
-use redis::{aio::Connection, AsyncCommands};
 use std::time::Duration;
 use tokio::{
-    io::{AsyncRead, AsyncWrite, BufStream},
+    io::{AsyncRead, AsyncWrite, AsyncWriteExt, BufStream},
     net::TcpStream,
 };
 
@@ -28,28 +26,23 @@ fn agent() -> String {
 
 #[tokio::main]
 async fn main() {
-    let args = cli::Arguments::parse();
-    println!("{args:?}");
-
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::TRACE)
         .init();
 
-    match start(&args).await {
+    match start().await {
         Ok(()) => info!("Shard has reached safe shutdown point."),
         Err(err) => error!("Shard has encountered an unrecoverable error: {err:?}"),
     }
 }
 
-async fn start(args: &cli::Arguments) -> Result<()> {
-    let redis = connect_redis(&args.db_url).await?;
-
+async fn start() -> Result<()> {
     trace!("Attempting to connect to server...");
 
     let (stream, key) = {
         let mut reconnections = 5;
         'a: loop {
-            match connect_server(args).await {
+            match connect_server().await {
                 Ok(ok) => break 'a ok,
 
                 Err(err) => {
@@ -73,29 +66,20 @@ async fn start(args: &cli::Arguments) -> Result<()> {
         }
     };
 
-    listen_server(redis, stream, key).await?;
+    listen_server(stream, key).await?;
 
     Ok(())
 }
 
-async fn connect_redis(db_url: &str) -> Result<Connection> {
-    let client = redis::Client::open(db_url)?;
-    let connection = client.get_async_connection().await?;
-
-    Ok(connection)
-}
-
-async fn connect_server(args: &cli::Arguments) -> Result<(BufStream<TcpStream>, Key)> {
-    let bind_address = args.bind_address;
-    let bind_port = args.bind_port;
-
-    debug!("Attempting to connect to server @{bind_address}:{bind_port}");
-    let socket = tokio::net::TcpStream::connect((bind_address, bind_port)).await?;
-    debug!("Connected to server @{bind_address}:{bind_port}");
+async fn connect_server() -> Result<(BufStream<TcpStream>, Key)> {
+    let server_addr = cfg::get().server.address;
+    debug!("Attempting to connect to server @{server_addr}");
+    let socket = tokio::net::TcpStream::connect(server_addr).await?;
+    debug!("Connected to server.");
     let mut stream = BufStream::new(socket);
 
     trace!("Negotiating ECDH shared secret with server...");
-    let key = crypto::ecdh_handshake(&mut stream).await?;
+    let key = lib::crypto::ecdh_handshake(&mut stream).await?;
 
     let Message::Ping { stamp } = receive_message(&mut stream, &key, MESSAGE_TIMEOUT).await? else {
         bail!("Server started correspondence with unexpected message (expected ping).")
@@ -117,7 +101,7 @@ async fn connect_server(args: &cli::Arguments) -> Result<(BufStream<TcpStream>, 
         Message::Info {
             version: version(),
             agent: agent(),
-            max_chunks: args.max_chunks,
+            max_chunks: cfg::get().storage.max,
         },
         MESSAGE_TIMEOUT,
         true,
@@ -127,11 +111,7 @@ async fn connect_server(args: &cli::Arguments) -> Result<(BufStream<TcpStream>, 
     Ok((stream, key))
 }
 
-async fn listen_server<S: AsyncRead + AsyncWrite + Unpin>(
-    mut redis: Connection,
-    mut stream: S,
-    key: Key,
-) -> Result<()> {
+async fn listen_server<S: AsyncRead + AsyncWrite + Unpin>(mut stream: S, key: Key) -> Result<()> {
     loop {
         match receive_message(&mut stream, &key, None).await? {
             Message::Ping { stamp } => {
@@ -146,15 +126,34 @@ async fn listen_server<S: AsyncRead + AsyncWrite + Unpin>(
             }
 
             Message::PrepareStore { id } => {
-                let chunk = receive_chunk(&mut stream, &key).await?;
-                redis.hset(id.as_bytes(), "blob", chunk.as_ref()).await?;
+                let storage_dir = cfg::get().storage.directory.join(&id.to_string());
+                let file = tokio::fs::File::options()
+                    .create_new(true)
+                    .write(true)
+                    .read(false)
+                    .open(&storage_dir)
+                    .await?;
+                let mut file_buf = BufStream::new(file);
+
+                for _ in 0..lib::message::CHUNK_PARTS {
+                    match receive_message(&mut stream, &key, MESSAGE_TIMEOUT).await? {
+                        Message::ChunkPart(part) => {
+                            file_buf.write_all(&part).await?;
+                        }
+
+                        message => {
+                            bail!("Expected chunk part, got: {message:?}")
+                        }
+                    }
+                }
+
+                file_buf.flush().await?;
             }
 
-            Message::PrepareStock { id } => {
-                let chunk: Box<[u8]> = redis.hget(id.as_bytes(), "blob").await?;
-                send_chunk(&mut stream, &key, chunk.as_ref()).await?;
-            }
-
+            // Message::PrepareStock { id } => {
+            //     let chunk: Box<[u8]> = redis.hget(id.as_bytes(), "blob").await?;
+            //     send_chunk(&mut stream, &key, chunk.as_ref()).await?;
+            // }
             message => error!("Unexpected message, cannot cope: {message:?}"),
         }
     }
