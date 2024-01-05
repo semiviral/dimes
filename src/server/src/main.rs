@@ -11,22 +11,24 @@ mod storage;
 mod tcp;
 
 use anyhow::Result;
-use once_cell::sync::Lazy;
+use once_cell::sync::{Lazy, OnceCell};
 use std::{collections::BTreeMap, path::PathBuf};
-use tokio::{net::TcpListener, sync::Mutex};
+use tokio::{
+    net::TcpListener,
+    sync::{Mutex, RwLock},
+};
 use tokio_util::sync::CancellationToken;
 use tracing::Level;
 use uuid::Uuid;
 
 static TEMP_DIR: Lazy<PathBuf> = Lazy::new(std::env::temp_dir);
-
 static PEER_TOKENS: Mutex<BTreeMap<Uuid, CancellationToken>> = Mutex::const_new(BTreeMap::new());
+
+static PGPOOL: RwLock<OnceCell<sqlx::PgPool>> = RwLock::const_new(OnceCell::new());
 
 fn agent() -> String {
     format!("{}/{}", String::from("Dimese"), env!("CARGO_PKG_VERSION"))
 }
-
-static MIGRATOR: sqlx::migrate::Migrator = migrate!();
 
 #[tokio::main]
 async fn main() {
@@ -48,13 +50,24 @@ async fn start() -> Result<()> {
     Ok(())
 }
 
+#[instrument]
 async fn connect_db() -> Result<()> {
-    let connect_str = &cfg::get().db.url;
+    static MIGRATOR: sqlx::migrate::Migrator = migrate!();
 
+    let connect_str = cfg::get().db.url.as_str();
+
+    debug!("Instantiating database connection pool: {connect_str:?}");
+    event!(Level::DEBUG, db_url = connect_str);
     let pgpool = sqlx::PgPool::connect(connect_str).await?;
+    debug!("Running migrations on database...");
     MIGRATOR.run(&pgpool).await?;
+    debug!("Migrations complete.");
 
-    todo!()
+    let pgpool_rw = PGPOOL.write().await;
+    pgpool_rw.set(pgpool).unwrap();
+
+    debug!("Finished connecting to database.");
+    Ok(())
 }
 
 async fn listen() -> Result<()> {
