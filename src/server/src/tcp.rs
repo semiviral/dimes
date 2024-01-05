@@ -51,7 +51,7 @@ async fn spawn_peer(
         .await
         .map_err(|err| anyhow!("[{peer_id}] Error during handshake: {err:?}"))?;
 
-    ping_pong(&mut peer_stream, &peer_key).await?;
+    lib::message::hello(&mut peer_stream, &peer_key).await?;
 
     let Message::Info {
         agent,

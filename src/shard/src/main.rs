@@ -8,11 +8,12 @@ mod cfg;
 use anyhow::Result;
 use lib::{
     crypto::Key,
-    message::{receive_chunk, receive_message, send_chunk, send_message, Message, MESSAGE_TIMEOUT},
+    message::{receive_message, send_message, Message, MESSAGE_TIMEOUT},
 };
 use std::time::Duration;
 use tokio::{
-    io::{AsyncRead, AsyncWrite, AsyncWriteExt, BufStream},
+    fs::File,
+    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufStream},
     net::TcpStream,
 };
 
@@ -74,25 +75,12 @@ async fn start() -> Result<()> {
 async fn connect_server() -> Result<(BufStream<TcpStream>, Key)> {
     let server_addr = cfg::get().server.address;
     debug!("Attempting to connect to server @{server_addr}");
-    let socket = tokio::net::TcpStream::connect(server_addr).await?;
-    debug!("Connected to server.");
-    let mut stream = BufStream::new(socket);
+    let mut stream = BufStream::new(TcpStream::connect(server_addr).await?);
 
     trace!("Negotiating ECDH shared secret with server...");
     let key = lib::crypto::ecdh_handshake(&mut stream).await?;
 
-    let Message::Ping { stamp } = receive_message(&mut stream, &key, MESSAGE_TIMEOUT).await? else {
-        bail!("Server started correspondence with unexpected message (expected ping).")
-    };
-
-    send_message(
-        &mut stream,
-        &key,
-        Message::Pong { restamp: stamp },
-        MESSAGE_TIMEOUT,
-        true,
-    )
-    .await?;
+    lib::message::hello(&mut stream, &key).await?;
 
     // Send info block to server.
     send_message(
@@ -114,27 +102,20 @@ async fn connect_server() -> Result<(BufStream<TcpStream>, Key)> {
 async fn listen_server<S: AsyncRead + AsyncWrite + Unpin>(mut stream: S, key: Key) -> Result<()> {
     loop {
         match receive_message(&mut stream, &key, None).await? {
-            Message::Ping { stamp } => {
-                send_message(
-                    &mut stream,
-                    &key,
-                    Message::Pong { restamp: stamp },
-                    MESSAGE_TIMEOUT,
-                    true,
-                )
-                .await?
+            Message::Ping => {
+                send_message(&mut stream, &key, Message::Pong, MESSAGE_TIMEOUT, true).await?
             }
 
             Message::PrepareStore { id } => {
-                let storage_dir = cfg::get().storage.directory.join(&id.to_string());
-                let file = tokio::fs::File::options()
+                let file_path = cfg::get().storage.directory.join(&id.to_string());
+                let file = File::options()
                     .create_new(true)
                     .write(true)
                     .read(false)
-                    .open(&storage_dir)
+                    .open(&file_path)
                     .await?;
-                let mut file_buf = BufStream::new(file);
 
+                let mut file_buf = BufStream::new(file);
                 for _ in 0..lib::message::CHUNK_PARTS {
                     match receive_message(&mut stream, &key, MESSAGE_TIMEOUT).await? {
                         Message::ChunkPart(part) => {
@@ -150,10 +131,39 @@ async fn listen_server<S: AsyncRead + AsyncWrite + Unpin>(mut stream: S, key: Ke
                 file_buf.flush().await?;
             }
 
-            // Message::PrepareStock { id } => {
-            //     let chunk: Box<[u8]> = redis.hget(id.as_bytes(), "blob").await?;
-            //     send_chunk(&mut stream, &key, chunk.as_ref()).await?;
-            // }
+            Message::PrepareStock { id } => {
+                let file_path = cfg::get().storage.directory.join(&id.to_string());
+                let file = File::options()
+                    .create(false)
+                    .write(false)
+                    .read(true)
+                    .open(&file_path)
+                    .await?;
+
+                let mut file_buf = BufStream::new(file);
+                let mut part_buf = [0u8; lib::message::CHUNK_PART_SIZE];
+                loop {
+                    let bytes_read = file_buf.read_exact(&mut part_buf).await?;
+
+                    if bytes_read == 0 {
+                        break;
+                    }
+
+                    assert_eq!(bytes_read, part_buf.len(), "file is unexpected size");
+
+                    send_message(
+                        &mut stream,
+                        &key,
+                        Message::ChunkPart(part_buf),
+                        MESSAGE_TIMEOUT,
+                        false,
+                    )
+                    .await?;
+                }
+
+                stream.flush().await?;
+            }
+
             message => error!("Unexpected message, cannot cope: {message:?}"),
         }
     }

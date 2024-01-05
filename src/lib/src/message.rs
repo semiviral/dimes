@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use crate::crypto::{Key, Nonce};
 use anyhow::Result;
+use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use serde_big_array::BigArray;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -11,19 +12,17 @@ use uuid::Uuid;
 pub const MESSAGE_TIMEOUT: Option<Duration> = Some(Duration::from_secs(3));
 
 pub const CHUNK_PARTS: usize = 2_000;
-pub const CHUNK_PART_SIZE: usize = 256;
+pub const CHUNK_PART_SIZE: usize = 512;
 pub const CHUNK_SIZE: usize = CHUNK_PART_SIZE * CHUNK_PARTS;
 
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Message {
-    // TODO remove stamps from pings, use a Hello for initial auth
-    Ping {
-        stamp: [u8; 16],
-    },
-    Pong {
-        restamp: [u8; 16],
-    },
+    Hello([u8; 16]),
+    Echo([u8; 16]),
+
+    Ping,
+    Pong,
 
     Info {
         agent: String,
@@ -40,7 +39,7 @@ pub enum Message {
     },
 
     #[serde(with = "BigArray")]
-    ChunkPart([u8; 512]),
+    ChunkPart([u8; CHUNK_PART_SIZE]),
 }
 
 #[instrument(level = "trace", skip(writer, key, message))]
@@ -119,27 +118,34 @@ pub async fn receive_message<R: AsyncRead + Unpin>(
     }
 }
 
-pub async fn ping_pong<S: AsyncRead + AsyncWrite + Unpin>(mut stream: S, key: &Key) -> Result<()> {
-    let stamp = rand::random();
+pub async fn hello<S: AsyncRead + AsyncWrite + Unpin>(mut stream: S, key: &Key) -> Result<()> {
+    let stamp = Uuid::new_v4().into_bytes();
     send_message(
         &mut stream,
         key,
-        Message::Ping { stamp },
+        Message::Hello(stamp),
         MESSAGE_TIMEOUT,
         true,
     )
     .await?;
-
-    let Message::Pong { restamp } = receive_message(&mut stream, key, MESSAGE_TIMEOUT).await?
-    else {
-        bail!("Peer responded with incorrect message type (expected Pong).");
+    let Message::Echo(restamp) = receive_message(&mut stream, key, MESSAGE_TIMEOUT).await? else {
+        bail!("Peer responded with incorrect message type (expected Echo).");
     };
 
     if restamp == stamp {
         Ok(())
     } else {
-        bail!("peer failed to restamp the ping correctly.")
+        bail!("Peer reponded with the incorrect stamp: expected {stamp:?}, got {restamp:?}")
     }
+}
+
+pub async fn ping_pong<S: AsyncRead + AsyncWrite + Unpin>(mut stream: S, key: &Key) -> Result<()> {
+    send_message(&mut stream, key, Message::Ping, MESSAGE_TIMEOUT, true).await?;
+    let Message::Pong = receive_message(&mut stream, key, MESSAGE_TIMEOUT).await? else {
+        bail!("Peer responded with incorrect message type (expected Pong).");
+    };
+
+    Ok(())
 }
 
 pub async fn receive_chunk<R: AsyncRead + AsyncWrite + Unpin>(

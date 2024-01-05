@@ -7,12 +7,11 @@ extern crate sqlx;
 
 mod api;
 mod cfg;
-mod storage;
 mod tcp;
 
 use anyhow::Result;
-use once_cell::sync::{Lazy, OnceCell};
-use std::{collections::BTreeMap, path::PathBuf};
+use once_cell::sync::OnceCell;
+use std::collections::BTreeMap;
 use tokio::{
     net::TcpListener,
     sync::{Mutex, RwLock},
@@ -21,9 +20,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::Level;
 use uuid::Uuid;
 
-static TEMP_DIR: Lazy<PathBuf> = Lazy::new(std::env::temp_dir);
 static PEER_TOKENS: Mutex<BTreeMap<Uuid, CancellationToken>> = Mutex::const_new(BTreeMap::new());
-
 static PGPOOL: RwLock<OnceCell<sqlx::PgPool>> = RwLock::const_new(OnceCell::new());
 
 fn agent() -> String {
@@ -44,7 +41,7 @@ async fn main() {
 }
 
 async fn start() -> Result<()> {
-    connect_db().await?;
+    //connect_db().await?;
     listen().await?;
 
     Ok(())
