@@ -24,7 +24,7 @@ static PEER_TOKENS: Mutex<BTreeMap<Uuid, CancellationToken>> = Mutex::const_new(
 static PGPOOL: RwLock<OnceCell<sqlx::PgPool>> = RwLock::const_new(OnceCell::new());
 
 fn agent() -> String {
-    format!("{}/{}", String::from("Dimese"), env!("CARGO_PKG_VERSION"))
+    format!("dimese-server/{}", env!("CARGO_PKG_VERSION"))
 }
 
 #[tokio::main]

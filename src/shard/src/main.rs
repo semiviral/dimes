@@ -80,7 +80,7 @@ async fn connect_server() -> Result<(BufStream<TcpStream>, Key)> {
     trace!("Negotiating ECDH shared secret with server...");
     let key = lib::crypto::ecdh_handshake(&mut stream).await?;
 
-    lib::message::hello(&mut stream, &key).await?;
+    lib::message::negotiate_hello(&mut stream, &key).await?;
 
     // Send info block to server.
     send_message(

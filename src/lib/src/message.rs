@@ -118,8 +118,12 @@ pub async fn receive_message<R: AsyncRead + Unpin>(
     }
 }
 
-pub async fn hello<S: AsyncRead + AsyncWrite + Unpin>(mut stream: S, key: &Key) -> Result<()> {
+pub async fn negotiate_hello<S: AsyncRead + AsyncWrite + Unpin>(
+    mut stream: S,
+    key: &Key,
+) -> Result<()> {
     let stamp = Uuid::new_v4().into_bytes();
+
     send_message(
         &mut stream,
         key,
@@ -128,14 +132,34 @@ pub async fn hello<S: AsyncRead + AsyncWrite + Unpin>(mut stream: S, key: &Key) 
         true,
     )
     .await?;
-    let Message::Echo(restamp) = receive_message(&mut stream, key, MESSAGE_TIMEOUT).await? else {
-        bail!("Peer responded with incorrect message type (expected Echo).");
-    };
 
-    if restamp == stamp {
-        Ok(())
-    } else {
-        bail!("Peer reponded with the incorrect stamp: expected {stamp:?}, got {restamp:?}")
+    match receive_message(&mut stream, key, MESSAGE_TIMEOUT).await? {
+        Message::Hello(stamp) => {
+            send_message(
+                &mut stream,
+                key,
+                Message::Echo(stamp),
+                MESSAGE_TIMEOUT,
+                true,
+            )
+            .await?
+        }
+
+        message => {
+            bail!("Peer responded with incorrect message type (expected Hello): {message:?}");
+        }
+    }
+
+    match receive_message(&mut stream, key, MESSAGE_TIMEOUT).await? {
+        Message::Echo(restamp) if restamp == stamp => Ok(()),
+
+        Message::Echo(restamp) => {
+            bail!("Peer reponded with the incorrect stamp: expected {stamp:?}, got {restamp:?}")
+        }
+
+        message => {
+            bail!("Peer responded with incorrect message type (expected Echo): {message:?}");
+        }
     }
 }
 
