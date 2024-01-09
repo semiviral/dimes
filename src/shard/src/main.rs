@@ -27,6 +27,9 @@ fn agent() -> String {
 
 #[tokio::main]
 async fn main() {
+    #[cfg(debug_assertions)]
+    dotenvy::dotenv().unwrap();
+
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::TRACE)
         .init();
