@@ -1,10 +1,8 @@
-use std::time::Duration;
-
 use crate::crypto::{Key, Nonce};
 use anyhow::Result;
-use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use serde_big_array::BigArray;
+use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tracing::Level;
 use uuid::Uuid;

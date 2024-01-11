@@ -1,7 +1,7 @@
 use uuid::Uuid;
 
 pub struct ShardInfo {
-    id: Uuid,
-    agent: String,
-    max_chunks: u32,
+    pub id: Uuid,
+    pub agent: String,
+    pub max_chunks: i64,
 }

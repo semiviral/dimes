@@ -5,10 +5,9 @@ extern crate anyhow;
 #[macro_use]
 extern crate sqlx;
 
-mod api;
 mod cfg;
+mod net;
 mod storage;
-mod tcp;
 
 use anyhow::Result;
 use once_cell::sync::OnceCell;
@@ -68,6 +67,7 @@ async fn connect_db() -> Result<()> {
     pgpool_rw.set(pgpool).unwrap();
 
     debug!("Finished connecting to database.");
+
     Ok(())
 }
 
@@ -83,8 +83,8 @@ async fn listen() -> Result<()> {
     let ctoken = CancellationToken::new();
 
     tokio::select! {
-        _ = tcp::accept_connections(shard_listener, &ctoken) => { std::process::exit(-100) }
-        _ = api::accept_connections(http_listener, &ctoken) => { std::process::exit(-200) }
+        _ = net::shards::accept_connections(shard_listener, &ctoken) => { std::process::exit(-100) }
+        _ = net::api::accept_connections(http_listener, &ctoken) => { std::process::exit(-200) }
 
         _ = ctoken.cancelled() => { Ok(()) }
     }

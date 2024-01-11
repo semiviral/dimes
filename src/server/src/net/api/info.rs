@@ -1,4 +1,4 @@
-use crate::api;
+use crate::net::api;
 use axum::{http::StatusCode, response::Response, routing::get, Router};
 use once_cell::sync::Lazy;
 use serde::Serialize;

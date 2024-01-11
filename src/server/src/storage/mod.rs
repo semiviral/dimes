@@ -9,9 +9,14 @@ pub struct Storage {
 
 impl Storage {
     pub async fn add_shard(&self, shard: types::ShardInfo) -> Result<()> {
-        query_as!(types::ShardInfo, "INSERT INTO shards VALUES (?, ?, ?)")
-            .execute(&self.pool)
-            .await?;
+        query!(
+            "INSERT INTO shards VALUES ($1, $2, $3)",
+            shard.id,
+            shard.agent,
+            shard.max_chunks
+        )
+        .execute(&self.pool)
+        .await?;
 
         Ok(())
     }

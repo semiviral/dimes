@@ -2,25 +2,25 @@ CREATE TABLE IF NOT EXISTS shards
 (
     id UUID PRIMARY KEY,
     agent TEXT NOT NULL,
-    max_chunks INT NOT NULL,
-    chunks INT NOT NULL,
+    max_chunks BIGINT NOT NULL,
+    chunks BIGINT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS groupings
 (
-    id UUID PRIMARY KEY,
-)
+    id UUID PRIMARY KEY
+);
 
 CREATE TABLE IF NOT EXISTS chunk_lookup
 (
     hash BYTEA PRIMARY KEY,
-    created DATETIME NOT NULL,
+    created TIMESTAMP WITH TIME ZONE NOT NULL,
     grouping UUID REFERENCES groupings(id),
-    seq INT NOT NULL,
+    seq BIGINT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS chunk_placement
 (
-    shard_id UUID REFERENCES shard(id),
-    chunk_hash BYTEA REFERNCES chunk_store(hash),
+    shard_id UUID REFERENCES shards(id),
+    chunk_hash BYTEA REFERENCES chunk_lookup(hash)
 );
