@@ -4,7 +4,8 @@ extern crate anyhow;
 extern crate tracing;
 
 pub mod crypto;
-pub mod message;
+pub mod error;
+pub mod net;
 
 #[derive(Debug, serde::Deserialize)]
 struct VideoMetadata {

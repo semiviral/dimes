@@ -1,44 +1,21 @@
-use crate::crypto::{Key, Nonce};
+use crate::{crypto::Key, error::unexpected_message};
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
-use serde_big_array::BigArray;
+use chacha20poly1305::XNonce;
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tracing::Level;
 use uuid::Uuid;
+
+mod message;
+pub use message::*;
+
+pub mod types;
 
 pub const MESSAGE_TIMEOUT: Option<Duration> = Some(Duration::from_secs(3));
 
 pub const CHUNK_PARTS: usize = 2_000;
 pub const CHUNK_PART_SIZE: usize = 512;
 pub const CHUNK_SIZE: usize = CHUNK_PART_SIZE * CHUNK_PARTS;
-
-#[allow(clippy::large_enum_variant)]
-#[derive(Debug, Serialize, Deserialize)]
-pub enum Message {
-    Hello([u8; 16]),
-    Echo([u8; 16]),
-
-    Ping,
-    Pong,
-
-    Info {
-        agent: String,
-        version: String,
-        max_chunks: u64,
-    },
-
-    PrepareStore {
-        id: Uuid,
-    },
-
-    PrepareStock {
-        id: Uuid,
-    },
-
-    #[serde(with = "BigArray")]
-    ChunkPart([u8; CHUNK_PART_SIZE]),
-}
 
 #[instrument(level = "trace", skip(writer, key, message))]
 pub async fn send_message<W: AsyncWrite + Unpin>(
@@ -93,7 +70,7 @@ pub async fn receive_message<R: AsyncRead + Unpin>(
         key: &Key,
     ) -> Result<Message> {
         let len = reader.read_u32_le().await? as usize;
-        let mut nonce = Nonce::default();
+        let mut nonce = XNonce::default();
         reader.read_exact(&mut nonce).await?;
 
         let mut data = vec![0u8; len];
@@ -140,13 +117,11 @@ pub async fn negotiate_hello<S: AsyncRead + AsyncWrite + Unpin>(
                 MESSAGE_TIMEOUT,
                 true,
             )
-            .await?
+            .await
         }
 
-        message => {
-            bail!("Peer responded with incorrect message type (expected Hello): {message:?}");
-        }
-    }
+        message => unexpected_message("Message::Hello", message),
+    }?;
 
     match receive_message(&mut stream, key, MESSAGE_TIMEOUT).await? {
         Message::Echo(restamp) if restamp == stamp => Ok(()),
@@ -155,9 +130,7 @@ pub async fn negotiate_hello<S: AsyncRead + AsyncWrite + Unpin>(
             bail!("Peer reponded with the incorrect stamp: expected {stamp:?}, got {restamp:?}")
         }
 
-        message => {
-            bail!("Peer responded with incorrect message type (expected Echo): {message:?}");
-        }
+        message => unexpected_message("Message::Echo", message),
     }
 }
 

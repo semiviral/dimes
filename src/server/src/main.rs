@@ -6,8 +6,8 @@ extern crate anyhow;
 extern crate sqlx;
 
 mod cfg;
+mod db_store;
 mod net;
-mod storage;
 
 use anyhow::Result;
 use once_cell::sync::OnceCell;
@@ -17,11 +17,11 @@ use tokio::{
     sync::{Mutex, RwLock},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::Level;
+use tracing::{Instrument, Level};
 use uuid::Uuid;
 
 static PEER_TOKENS: Mutex<BTreeMap<Uuid, CancellationToken>> = Mutex::const_new(BTreeMap::new());
-static PGPOOL: RwLock<OnceCell<sqlx::PgPool>> = RwLock::const_new(OnceCell::new());
+static DB_STORE: RwLock<OnceCell<db_store::DbStore>> = RwLock::const_new(OnceCell::new());
 
 fn agent() -> String {
     format!("dimese-server/{}", env!("CARGO_PKG_VERSION"))
@@ -44,7 +44,7 @@ async fn main() {
 }
 
 async fn start() -> Result<()> {
-    //connect_db().await?;
+    connect_db().await?;
     listen().await?;
 
     Ok(())
@@ -56,15 +56,16 @@ async fn connect_db() -> Result<()> {
 
     let connect_str = cfg::get().db.url.as_str();
 
-    debug!("Instantiating database connection pool: {connect_str:?}");
     event!(Level::DEBUG, db_url = connect_str);
     let pgpool = sqlx::PgPool::connect(connect_str).await?;
-    debug!("Running migrations on database...");
-    MIGRATOR.run(&pgpool).await?;
-    debug!("Migrations complete.");
 
-    let pgpool_rw = PGPOOL.write().await;
-    pgpool_rw.set(pgpool).unwrap();
+    MIGRATOR
+        .run(&pgpool)
+        .instrument(span!(Level::TRACE, "migrations"))
+        .await?;
+
+    let pgpool_rw = DB_STORE.write().await;
+    pgpool_rw.set(db_store::DbStore::new(pgpool)).unwrap();
 
     debug!("Finished connecting to database.");
 

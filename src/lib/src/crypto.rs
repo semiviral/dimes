@@ -1,6 +1,6 @@
 use anyhow::Result;
 use blake2::digest::{Update, VariableOutput};
-use chacha20poly1305::{aead::Aead, AeadCore, KeyInit, XChaCha20Poly1305};
+use chacha20poly1305::{aead::Aead, AeadCore, KeyInit, Nonce, XChaCha20Poly1305, XNonce};
 use rand::rngs::OsRng;
 use tokio::io::{AsyncRead, AsyncWrite};
 use x25519_dalek::{EphemeralSecret, PublicKey};
@@ -9,12 +9,11 @@ const XCHACHA20_POLY1305_KEY_SIZE: usize = 32;
 const XCHACHA20_POLY1305_NONCE_SIZE: usize = 24;
 
 pub type Key = [u8; XCHACHA20_POLY1305_KEY_SIZE];
-pub type Nonce = [u8; XCHACHA20_POLY1305_NONCE_SIZE];
 
 pub async fn ecdh_handshake<R: AsyncRead + AsyncWrite + Unpin>(mut stream: R) -> Result<Key> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-    let private_key = EphemeralSecret::random_from_rng(OsRng);
+    let private_key = EphemeralSecret::random_from_rng(&mut OsRng);
     let public_key = PublicKey::from(&private_key);
 
     stream.write_all(public_key.as_bytes()).await?;
@@ -34,7 +33,7 @@ pub async fn ecdh_handshake<R: AsyncRead + AsyncWrite + Unpin>(mut stream: R) ->
     Ok(key)
 }
 
-pub fn encrypt(key: &Key, data: &[u8]) -> Result<(Nonce, Box<[u8]>)> {
+pub fn encrypt(key: &Key, data: &[u8]) -> Result<(XNonce, Box<[u8]>)> {
     let nonce = XChaCha20Poly1305::generate_nonce(&mut OsRng);
     let cipher = XChaCha20Poly1305::new(key.into());
     let encrypted_data = cipher
@@ -44,7 +43,7 @@ pub fn encrypt(key: &Key, data: &[u8]) -> Result<(Nonce, Box<[u8]>)> {
     Ok((nonce.into(), encrypted_data.into_boxed_slice()))
 }
 
-pub fn decrypt(key: &Key, nonce: &Nonce, data: &[u8]) -> Result<Box<[u8]>> {
+pub fn decrypt(key: &Key, nonce: &XNonce, data: &[u8]) -> Result<Box<[u8]>> {
     let cipher = XChaCha20Poly1305::new(key.into());
     let decrypted_data = cipher
         .decrypt(nonce.into(), data)

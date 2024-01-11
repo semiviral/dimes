@@ -8,21 +8,25 @@ mod cfg;
 use anyhow::Result;
 use lib::{
     crypto::Key,
-    message::{receive_message, send_message, Message, MESSAGE_TIMEOUT},
+    net::{receive_message, send_message, types::ShardInfo, Message, MESSAGE_TIMEOUT},
 };
+use once_cell::sync::Lazy;
 use std::time::Duration;
 use tokio::{
     fs::File,
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufStream},
     net::TcpStream,
 };
+use uuid::Uuid;
 
-fn version() -> String {
-    String::from(env!("CARGO_PKG_VERSION"))
-}
+static ID: Lazy<Uuid> = Lazy::new(Uuid::now_v7);
 
 fn agent() -> String {
-    String::from("dimese-shard")
+    format!("dimese-shard/{}", env!("CARGO_PKG_VERSION"))
+}
+
+fn info() -> ShardInfo {
+    ShardInfo::new(*ID, agent(), cfg::get().storage.max).unwrap()
 }
 
 #[tokio::main]
@@ -83,17 +87,13 @@ async fn connect_server() -> Result<(BufStream<TcpStream>, Key)> {
     trace!("Negotiating ECDH shared secret with server...");
     let key = lib::crypto::ecdh_handshake(&mut stream).await?;
 
-    lib::message::negotiate_hello(&mut stream, &key).await?;
+    lib::net::negotiate_hello(&mut stream, &key).await?;
 
     // Send info block to server.
     send_message(
         &mut stream,
         &key,
-        Message::Info {
-            version: version(),
-            agent: agent(),
-            max_chunks: cfg::get().storage.max,
-        },
+        Message::Info(info()),
         MESSAGE_TIMEOUT,
         true,
     )
@@ -119,7 +119,7 @@ async fn listen_server<S: AsyncRead + AsyncWrite + Unpin>(mut stream: S, key: Ke
                     .await?;
 
                 let mut file_buf = BufStream::new(file);
-                for _ in 0..lib::message::CHUNK_PARTS {
+                for _ in 0..lib::net::CHUNK_PARTS {
                     match receive_message(&mut stream, &key, MESSAGE_TIMEOUT).await? {
                         Message::ChunkPart(part) => {
                             file_buf.write_all(&part).await?;
@@ -144,7 +144,7 @@ async fn listen_server<S: AsyncRead + AsyncWrite + Unpin>(mut stream: S, key: Ke
                     .await?;
 
                 let mut file_buf = BufStream::new(file);
-                let mut part_buf = [0u8; lib::message::CHUNK_PART_SIZE];
+                let mut part_buf = [0u8; lib::net::CHUNK_PART_SIZE];
                 loop {
                     let bytes_read = file_buf.read_exact(&mut part_buf).await?;
 

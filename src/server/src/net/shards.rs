@@ -2,7 +2,8 @@ use crate::PEER_TOKENS;
 use anyhow::Result;
 use lib::{
     crypto::Key,
-    message::{ping_pong, receive_message, Message, MESSAGE_TIMEOUT},
+    error::unexpected_message,
+    net::{ping_pong, receive_message, types::ShardInfo, Message, MESSAGE_TIMEOUT},
 };
 use std::{net::SocketAddr, time::Duration};
 use tokio::{
@@ -14,9 +15,10 @@ use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, Level};
 use uuid::Uuid;
 
+#[instrument(skip(listener, ctoken))]
 pub async fn accept_connections(listener: TcpListener, ctoken: &CancellationToken) -> Result<()> {
     loop {
-        trace!("Waiting for new shard.");
+        trace!("Waiting to accept shard...");
         let (peer_socket, peer_address) = listener.accept().await?;
         let peer_id = Uuid::now_v7();
         let peer_ctoken = ctoken.child_token();
@@ -24,14 +26,13 @@ pub async fn accept_connections(listener: TcpListener, ctoken: &CancellationToke
         event!(Level::DEBUG, ip = %peer_address.ip(), port = peer_address.port(), id = %peer_id);
 
         tokio::spawn(async move {
-            let (peer_stream, peer_key, peer_agent) =
-                spawn_peer(peer_id, peer_socket, &peer_ctoken)
-                    .instrument(span!(Level::DEBUG, "spawn peer", id = %peer_id))
-                    .await
-                    .expect("failed spawning peer");
+            let (peer_stream, peer_key, peer_info) = spawn_peer(peer_id, peer_socket, &peer_ctoken)
+                .instrument(span!(Level::DEBUG, "spawn peer", id = %peer_id))
+                .await
+                .expect("failed spawning peer");
 
             listen_peer(peer_id, peer_ctoken, peer_stream, peer_address, peer_key)
-                .instrument(span!(Level::DEBUG, "peer", id = %peer_id, agent = %peer_agent))
+                .instrument(span!(Level::DEBUG, "listen peer", id = %peer_info.id(), agent = %peer_info.agent()))
                 .await
         });
     }
@@ -41,7 +42,7 @@ async fn spawn_peer(
     peer_id: Uuid,
     peer_socket: TcpStream,
     peer_ctoken: &CancellationToken,
-) -> Result<(BufStream<TcpStream>, Key, String)> {
+) -> Result<(BufStream<TcpStream>, Key, ShardInfo)> {
     let mut peer_tokens = PEER_TOKENS.lock().await;
     peer_tokens.insert(peer_id, peer_ctoken.clone());
     drop(peer_tokens);
@@ -51,29 +52,34 @@ async fn spawn_peer(
         .await
         .map_err(|err| anyhow!("[{peer_id}] Error during handshake: {err:?}"))?;
 
-    lib::message::negotiate_hello(&mut peer_stream, &peer_key).await?;
+    lib::net::negotiate_hello(&mut peer_stream, &peer_key).await?;
 
-    let Message::Info {
-        agent,
-        version,
-        max_chunks,
-    } = receive_message(&mut peer_stream, &peer_key, MESSAGE_TIMEOUT).await?
-    else {
-        bail!("expected Info message")
-    };
+    let peer_info = match receive_message(&mut peer_stream, &peer_key, MESSAGE_TIMEOUT).await? {
+        Message::Info(info) => Ok(info),
+
+        message => unexpected_message("Message::Info", message),
+    }
+    .unwrap();
 
     event!(
         Level::DEBUG,
-        peer.id = %peer_id.to_string(),
-        peer.agent = %&agent,
-        peer.version = %&version,
-        peer.chunks = max_chunks
+        peer.id = %peer_info.id().to_string(),
+        peer.agent = %&peer_info.agent(),
+        peer.chunks = peer_info.max_chunks()
     );
+
+    let pg_pool_read = crate::DB_STORE.read().await;
+    pg_pool_read
+        .get()
+        .unwrap()
+        .add_shard(peer_info.clone())
+        .await?;
+    drop(pg_pool_read);
 
     debug!("Connected.");
 
     // TODO use a string cache for the agent infos
-    Ok((peer_stream, peer_key, format!("{agent}/{version}")))
+    Ok((peer_stream, peer_key, peer_info))
 }
 
 async fn listen_peer(
