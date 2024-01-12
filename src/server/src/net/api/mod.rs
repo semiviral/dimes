@@ -1,7 +1,6 @@
+mod info;
 mod media;
-mod shard;
-
-pub mod responses;
+pub mod response;
 
 use anyhow::Result;
 use axum::Router;
@@ -10,7 +9,7 @@ use tokio_util::sync::CancellationToken;
 
 pub async fn accept_connections(listener: TcpListener, _ctoken: &CancellationToken) -> Result<()> {
     let router = Router::new()
-        .nest("/api", shard::routes())
+        .nest("/api", info::routes())
         .nest("/api", media::routes());
 
     axum::serve(listener, router).await?;

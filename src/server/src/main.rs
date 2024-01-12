@@ -5,9 +5,9 @@ extern crate anyhow;
 #[macro_use]
 extern crate sqlx;
 
-mod api;
 mod cfg;
 mod db_store;
+mod net;
 
 use anyhow::Result;
 use once_cell::sync::OnceCell;
@@ -45,7 +45,7 @@ async fn main() {
 
 async fn start() -> Result<()> {
     connect_db().await?;
-    listen_http().await?;
+    listen().await?;
 
     Ok(())
 }
@@ -72,7 +72,11 @@ async fn connect_db() -> Result<()> {
     Ok(())
 }
 
-async fn listen_http() -> Result<()> {
+async fn listen() -> Result<()> {
+    let shard_bind = cfg::get().bind.shard;
+    event!(Level::DEBUG, ip = %shard_bind.ip(), port = shard_bind.port());
+    let shard_listener = TcpListener::bind(shard_bind).await?;
+
     let http_bind = cfg::get().bind.http;
     event!(Level::DEBUG, ip = %http_bind.ip(), port = http_bind.port());
     let http_listener = TcpListener::bind(http_bind).await?;
@@ -80,7 +84,8 @@ async fn listen_http() -> Result<()> {
     let ctoken = CancellationToken::new();
 
     tokio::select! {
-        _ = api::accept_connections(http_listener, &ctoken) => { std::process::exit(-100) }
+        _ = net::shards::accept_connections(shard_listener, &ctoken) => { std::process::exit(-100) }
+        _ = net::api::accept_connections(http_listener, &ctoken) => { std::process::exit(-200) }
 
         _ = ctoken.cancelled() => { Ok(()) }
     }

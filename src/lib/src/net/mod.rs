@@ -17,7 +17,6 @@ pub const CHUNK_PARTS: usize = 2_000;
 pub const CHUNK_PART_SIZE: usize = 512;
 pub const CHUNK_SIZE: usize = CHUNK_PART_SIZE * CHUNK_PARTS;
 
-
 #[instrument(level = "trace", skip(writer, key, message))]
 pub async fn send_message<W: AsyncWrite + Unpin>(
     writer: W,
