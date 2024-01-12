@@ -7,13 +7,17 @@ pub fn default() -> Builder {
         .header("Server", crate::agent())
 }
 
+pub fn empty() -> Response {
+    default().body(Body::empty()).unwrap()
+}
+
 pub fn json<T: serde::Serialize>(item: T) -> Result<Response> {
     let body = serde_json::to_string(&item)?;
 
-    let builder = default()
-        .header("Content-Length", body.len())
+    let resposne = default()
         .header("Content-Type", "application/json")
+        .header("Content-Length", body.len())
         .body(Body::from(body))?;
 
-    Ok(builder)
+    Ok(resposne)
 }

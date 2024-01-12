@@ -18,6 +18,6 @@ redis = { version = "*", features = ["ahash", "tokio-comp"] }
 tokio = { version = "*", features = ["full"] }
 serde = { version = "*", features = ["derive"] }
 axum = { version = "*", features = ["tracing", "http2", "multipart"] }
-
+reqwest ={ version = "*", features = ["native-tls", "json"]}
 once_cell = "*"
 uuid = { version = "*", features = ["v7", "fast-rng"] }

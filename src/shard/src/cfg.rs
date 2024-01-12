@@ -1,6 +1,4 @@
-use once_cell::sync::Lazy;
 use serde::Deserialize;
-use std::net::SocketAddr;
 
 #[derive(Debug, Deserialize)]
 pub struct Cfg {
@@ -10,7 +8,7 @@ pub struct Cfg {
 
 #[derive(Debug, Deserialize)]
 pub struct Server {
-    pub address: SocketAddr,
+    pub url: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -20,6 +18,8 @@ pub struct Storage {
 }
 
 pub fn get() -> &'static Cfg {
+    use once_cell::sync::Lazy;
+
     static APP_CONFIG: Lazy<Cfg> = Lazy::new(|| {
         use config::{Config, Environment};
 
