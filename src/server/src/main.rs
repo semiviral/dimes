@@ -20,7 +20,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, Level};
 use uuid::Uuid;
 
-static PEER_TOKENS: Mutex<BTreeMap<Uuid, CancellationToken>> = Mutex::const_new(BTreeMap::new());
+static PEER_CTOKENS: Mutex<BTreeMap<Uuid, CancellationToken>> = Mutex::const_new(BTreeMap::new());
 static DB_STORE: RwLock<OnceCell<db_store::DbStore>> = RwLock::const_new(OnceCell::new());
 
 fn agent() -> String {

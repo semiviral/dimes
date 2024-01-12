@@ -35,7 +35,7 @@ pub async fn send_message<W: AsyncWrite + Unpin>(
         let (nonce, encrypted_data) = crate::crypto::encrypt(key, &message_bytes)?;
 
         writer.write_u32_le(encrypted_data.len() as u32).await?;
-        writer.write_all(&nonce).await?;
+        writer.write_all(nonce.as_slice()).await?;
         writer.write_all(&encrypted_data).await?;
 
         event!(Level::TRACE,
@@ -136,55 +136,9 @@ pub async fn negotiate_hello<S: AsyncRead + AsyncWrite + Unpin>(
 
 pub async fn ping_pong<S: AsyncRead + AsyncWrite + Unpin>(mut stream: S, key: &Key) -> Result<()> {
     send_message(&mut stream, key, Message::Ping, MESSAGE_TIMEOUT, true).await?;
-    let Message::Pong = receive_message(&mut stream, key, MESSAGE_TIMEOUT).await? else {
-        bail!("Peer responded with incorrect message type (expected Pong).");
-    };
 
-    Ok(())
-}
-
-pub async fn receive_chunk<R: AsyncRead + AsyncWrite + Unpin>(
-    mut reader: R,
-    key: &Key,
-) -> Result<Box<[u8]>> {
-    let mut chunk = vec![0u8; CHUNK_SIZE].into_boxed_slice();
-
-    for empty_part in chunk.chunks_mut(CHUNK_PART_SIZE) {
-        assert!(empty_part.len() == CHUNK_PART_SIZE);
-
-        match receive_message(&mut reader, key, MESSAGE_TIMEOUT).await? {
-            Message::ChunkPart(part) => {
-                empty_part.copy_from_slice(&part);
-            }
-
-            message => {
-                bail!("Expected chunk part, got: {message:?}")
-            }
-        }
+    match receive_message(&mut stream, key, MESSAGE_TIMEOUT).await? {
+        Message::Pong => Ok(()),
+        message => unexpected_message("Message::Pong", message),
     }
-
-    Ok(chunk)
-}
-
-pub async fn send_chunk<W: AsyncWrite + Unpin>(
-    mut writer: W,
-    key: &Key,
-    chunk: &[u8],
-) -> Result<()> {
-    assert_eq!(chunk.len(), CHUNK_SIZE, "chunk is not the correct size");
-
-    for part in chunk.chunks(CHUNK_PART_SIZE) {
-        send_message(
-            &mut writer,
-            key,
-            Message::ChunkPart(part.try_into().unwrap()),
-            MESSAGE_TIMEOUT,
-            false,
-        )
-        .await?;
-    }
-
-    writer.flush().await?;
-
-    Ok(())
 }

@@ -8,14 +8,20 @@ mod cfg;
 use anyhow::Result;
 use lib::{
     crypto::Key,
-    net::{receive_message, send_message, types::ShardInfo, Message, MESSAGE_TIMEOUT},
+    error::unexpected_message,
+    net::{
+        receive_message, send_message,
+        types::{ChunkHash, ShardInfo},
+        Message, MESSAGE_TIMEOUT,
+    },
 };
 use once_cell::sync::Lazy;
-use std::time::Duration;
+use std::{collections::BTreeMap, time::Duration};
 use tokio::{
     fs::File,
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufStream},
     net::TcpStream,
+    sync::{Mutex, RwLock},
 };
 use uuid::Uuid;
 
@@ -26,7 +32,7 @@ fn agent() -> String {
 }
 
 fn info() -> ShardInfo {
-    ShardInfo::new(*ID, agent(), cfg::get().storage.max).unwrap()
+    ShardInfo::new(*ID, agent(), cfg::get().storage.chunks).unwrap()
 }
 
 #[tokio::main]
@@ -93,7 +99,7 @@ async fn connect_server() -> Result<(BufStream<TcpStream>, Key)> {
     send_message(
         &mut stream,
         &key,
-        Message::Info(info()),
+        Message::ShardInfo(info()),
         MESSAGE_TIMEOUT,
         true,
     )
@@ -102,6 +108,11 @@ async fn connect_server() -> Result<(BufStream<TcpStream>, Key)> {
     Ok((stream, key))
 }
 
+static STORING_CHUNKS: RwLock<BTreeMap<ChunkHash, Mutex<Box<[u8]>>>> =
+    RwLock::const_new(BTreeMap::new());
+static STOCKING_CHUNKS: RwLock<BTreeMap<ChunkHash, Mutex<Box<[u8]>>>> =
+    RwLock::const_new(BTreeMap::new());
+
 async fn listen_server<S: AsyncRead + AsyncWrite + Unpin>(mut stream: S, key: Key) -> Result<()> {
     loop {
         match receive_message(&mut stream, &key, None).await? {
@@ -109,32 +120,30 @@ async fn listen_server<S: AsyncRead + AsyncWrite + Unpin>(mut stream: S, key: Ke
                 send_message(&mut stream, &key, Message::Pong, MESSAGE_TIMEOUT, true).await?
             }
 
-            Message::PrepareStore { id } => {
-                let file_path = cfg::get().storage.directory.join(&id.to_string());
-                let file = File::options()
-                    .create_new(true)
-                    .write(true)
-                    .read(false)
-                    .open(&file_path)
-                    .await?;
+            Message::PrepareStore { hash } => {
+                let storing_chunks = STORING_CHUNKS.read().await;
+                
+                if storing_chunks.contains_key(&hash) {
+                    send_message(&mut stream, &key, Message, timeout, true).await?;
 
-                let mut file_buf = BufStream::new(file);
+                }
+
+                
+                let storing_chunks = STORING_CHUNKS.write().await;
+
+
                 for _ in 0..lib::net::CHUNK_PARTS {
                     match receive_message(&mut stream, &key, MESSAGE_TIMEOUT).await? {
                         Message::ChunkPart(part) => {
                             file_buf.write_all(&part).await?;
                         }
 
-                        message => {
-                            bail!("Expected chunk part, got: {message:?}")
-                        }
+                        message => unexpected_message("Message::ChunkPart", message),
                     }
                 }
-
-                file_buf.flush().await?;
             }
 
-            Message::PrepareStock { id } => {
+            Message::PrepareStock { hash: id } => {
                 let file_path = cfg::get().storage.directory.join(&id.to_string());
                 let file = File::options()
                     .create(false)

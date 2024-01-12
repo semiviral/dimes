@@ -1,7 +1,6 @@
-use crate::net::types::ShardInfo;
+use crate::net::types::{ChunkHash, ShardInfo};
 use serde::{Deserialize, Serialize};
 use serde_big_array::BigArray;
-use uuid::Uuid;
 
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Serialize, Deserialize)]
@@ -12,16 +11,26 @@ pub enum Message {
     Ping,
     Pong,
 
-    Info(ShardInfo),
+    Ok,
+
+    ShardInfo(ShardInfo),
+    ShardShutdown,
 
     PrepareStore {
-        id: Uuid,
+        hash: ChunkHash,
+    },
+    AlreadyStoring {
+        hash: ChunkHash,
     },
 
     PrepareStock {
-        id: Uuid,
+        hash: ChunkHash,
     },
 
-    #[serde(with = "BigArray")]
-    ChunkPart([u8; super::CHUNK_PART_SIZE]),
+    ChunkPart {
+        hash: ChunkHash,
+
+        #[serde(with = "BigArray")]
+        part: [u8; super::CHUNK_PART_SIZE],
+    },
 }

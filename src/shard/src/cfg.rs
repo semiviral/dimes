@@ -1,6 +1,6 @@
 use once_cell::sync::Lazy;
 use serde::Deserialize;
-use std::{net::SocketAddr, path::PathBuf};
+use std::net::SocketAddr;
 
 #[derive(Debug, Deserialize)]
 pub struct Cfg {
@@ -15,8 +15,8 @@ pub struct Server {
 
 #[derive(Debug, Deserialize)]
 pub struct Storage {
-    pub directory: PathBuf,
-    pub max: u64,
+    pub url: String,
+    pub chunks: u64,
 }
 
 pub fn get() -> &'static Cfg {

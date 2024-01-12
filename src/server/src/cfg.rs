@@ -6,6 +6,7 @@ use std::net::SocketAddr;
 pub struct Cfg {
     pub bind: Bind,
     pub db: Db,
+    pub interval: Interval,
 }
 
 #[derive(Debug, Deserialize)]
@@ -17,6 +18,11 @@ pub struct Bind {
 #[derive(Debug, Deserialize)]
 pub struct Db {
     pub url: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Interval {
+    pub ping: u64,
 }
 
 pub fn get() -> &'static Cfg {

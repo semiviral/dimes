@@ -13,9 +13,11 @@ anyhow = "*"
 tracing = "*"
 tracing-subscriber = { version = "*", features = ["parking_lot"] }
 config = "*"
+redis = { version = "*", features = ["ahash", "tokio-comp"] }
 
 tokio = { version = "*", features = ["full"] }
 serde = { version = "*", features = ["derive"] }
+axum = { version = "*", features = ["tracing", "http2", "multipart"] }
 
 once_cell = "*"
 uuid = { version = "*", features = ["v7", "fast-rng"] }
