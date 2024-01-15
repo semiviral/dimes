@@ -4,11 +4,11 @@ extern crate tracing;
 extern crate anyhow;
 
 mod cfg;
+mod pools;
 
 use anyhow::Result;
 use lib::{
     crypto::Key,
-    error::unexpected_message,
     net::{
         receive_message, send_message,
         types::{ChunkHash, ShardInfo},
@@ -16,12 +16,14 @@ use lib::{
     },
 };
 use once_cell::sync::Lazy;
-use std::{collections::BTreeMap, time::Duration};
+use std::{collections::BTreeMap, ops::Deref, sync::Arc, time::Duration};
 use tokio::{
-    fs::File,
-    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufStream},
+    io::{AsyncWrite, AsyncWriteExt, BufReader, BufWriter},
     net::TcpStream,
-    sync::{Mutex, RwLock},
+    sync::{
+        mpsc::{Receiver, Sender},
+        Mutex, RwLock,
+    },
 };
 use uuid::Uuid;
 
@@ -44,51 +46,49 @@ async fn main() {
         .with_max_level(tracing::Level::TRACE)
         .init();
 
-    match start().await {
+    match run().await {
         Ok(()) => info!("Shard has reached safe shutdown point."),
         Err(err) => error!("Shard has encountered an unrecoverable error: {err:?}"),
     }
 }
 
-async fn start() -> Result<()> {
+async fn run() -> Result<()> {
     trace!("Attempting to connect to server...");
 
-    let (stream, key) = {
-        let mut reconnections = 5;
-        'a: loop {
-            match connect_server().await {
-                Ok(ok) => break 'a ok,
+    let (stream, key) = connect_server().await?;
 
-                Err(err) => {
-                    error!("Error connecting to server: {err:?}");
+    use tokio::sync::mpsc::channel;
+    let (reader, writer) = stream.into_split();
+    let mut reader = BufReader::new(reader);
+    let writer = BufWriter::new(writer);
 
-                    if reconnections == 0 {
-                        error!("Retried too many times; failed to connect to server.");
+    let (send_queue, recv_queue) = channel(cfg::get().queuing.send);
+    let send_queue = Arc::new(send_queue);
 
-                        std::process::exit(404);
-                    } else {
-                        reconnections -= 1;
-                    }
+    tokio::spawn(process_writes(writer, recv_queue, key));
 
-                    error!("Retrying connection in 10 seconds.");
+    loop {
+        let message = receive_message(&mut reader, &key, None).await?;
+        tokio::spawn(process_message(Arc::clone(&send_queue), message));
+    }
+}
 
-                    tokio::time::sleep(Duration::from_secs(10)).await;
+async fn connect_server() -> Result<(TcpStream, Key)> {
+    let server_addr = cfg::get().server.address;
 
-                    continue 'a;
-                }
+    let mut stream = loop {
+        debug!("Attempting to connect to server @{server_addr}");
+
+        match TcpStream::connect(server_addr).await {
+            Ok(stream) => break stream,
+
+            Err(err) => {
+                error!("Error connecting to server: {err:?}");
+                error!("Waiting 10 seconds to try again.");
+                tokio::time::sleep(Duration::from_secs(10)).await;
             }
         }
     };
-
-    listen_server(stream, key).await?;
-
-    Ok(())
-}
-
-async fn connect_server() -> Result<(BufStream<TcpStream>, Key)> {
-    let server_addr = cfg::get().server.address;
-    debug!("Attempting to connect to server @{server_addr}");
-    let mut stream = BufStream::new(TcpStream::connect(server_addr).await?);
 
     trace!("Negotiating ECDH shared secret with server...");
     let key = lib::crypto::ecdh_handshake(&mut stream).await?;
@@ -110,73 +110,44 @@ async fn connect_server() -> Result<(BufStream<TcpStream>, Key)> {
 
 static STORING_CHUNKS: RwLock<BTreeMap<ChunkHash, Mutex<Box<[u8]>>>> =
     RwLock::const_new(BTreeMap::new());
-static STOCKING_CHUNKS: RwLock<BTreeMap<ChunkHash, Mutex<Box<[u8]>>>> =
-    RwLock::const_new(BTreeMap::new());
 
-async fn listen_server<S: AsyncRead + AsyncWrite + Unpin>(mut stream: S, key: Key) -> Result<()> {
-    loop {
-        match receive_message(&mut stream, &key, None).await? {
-            Message::Ping => {
-                send_message(&mut stream, &key, Message::Pong, MESSAGE_TIMEOUT, true).await?
+#[allow(clippy::large_enum_variant)]
+pub enum WriteCommand {
+    Send(Message),
+    Flush,
+}
+
+#[instrument(skip(writer, recv_queue, key))]
+async fn process_writes(
+    mut writer: impl AsyncWrite + Unpin,
+    mut recv_queue: Receiver<WriteCommand>,
+    key: Key,
+) {
+    while let Some(command) = recv_queue.recv().await {
+        match command {
+            WriteCommand::Send(message) => {
+                send_message(&mut writer, &key, message, MESSAGE_TIMEOUT, false)
+                    .await
+                    .expect("failed to write message to stream")
             }
+
+            WriteCommand::Flush => writer.flush().await.expect("failed to flush write stream"),
+        }
+    }
+}
+
+#[instrument(skip(send_queue))]
+async fn process_message(send_queue: impl Deref<Target = Sender<WriteCommand>>, message: Message) {
+    match message {
+        Message::Ping => send_queue
+            .send(WriteCommand::Send(Message::Pong))
+            .await
+            .expect("failed to send ping"),
 
             Message::PrepareStore { hash } => {
-                let storing_chunks = STORING_CHUNKS.read().await;
                 
-                if storing_chunks.contains_key(&hash) {
-                    send_message(&mut stream, &key, Message, timeout, true).await?;
-
-                }
-
-                
-                let storing_chunks = STORING_CHUNKS.write().await;
-
-
-                for _ in 0..lib::net::CHUNK_PARTS {
-                    match receive_message(&mut stream, &key, MESSAGE_TIMEOUT).await? {
-                        Message::ChunkPart(part) => {
-                            file_buf.write_all(&part).await?;
-                        }
-
-                        message => unexpected_message("Message::ChunkPart", message),
-                    }
-                }
             }
 
-            Message::PrepareStock { hash: id } => {
-                let file_path = cfg::get().storage.directory.join(&id.to_string());
-                let file = File::options()
-                    .create(false)
-                    .write(false)
-                    .read(true)
-                    .open(&file_path)
-                    .await?;
-
-                let mut file_buf = BufStream::new(file);
-                let mut part_buf = [0u8; lib::net::CHUNK_PART_SIZE];
-                loop {
-                    let bytes_read = file_buf.read_exact(&mut part_buf).await?;
-
-                    if bytes_read == 0 {
-                        break;
-                    }
-
-                    assert_eq!(bytes_read, part_buf.len(), "file is unexpected size");
-
-                    send_message(
-                        &mut stream,
-                        &key,
-                        Message::ChunkPart(part_buf),
-                        MESSAGE_TIMEOUT,
-                        false,
-                    )
-                    .await?;
-                }
-
-                stream.flush().await?;
-            }
-
-            message => error!("Unexpected message, cannot cope: {message:?}"),
-        }
+        message => error!("Unexpected message, cannot cope: {message:?}"),
     }
 }

@@ -9,13 +9,14 @@ use uuid::Uuid;
 mod message;
 pub use message::*;
 
-pub mod types;
+mod types;
+pub use types::*;
 
 pub const MESSAGE_TIMEOUT: Option<Duration> = Some(Duration::from_secs(3));
 
-pub const CHUNK_PARTS: usize = 2_000;
-pub const CHUNK_PART_SIZE: usize = 512;
-pub const CHUNK_SIZE: usize = CHUNK_PART_SIZE * CHUNK_PARTS;
+pub const CHUNK_PARTS: usize = 0x100; // 256
+pub const CHUNK_PART_SIZE: usize = 0x1000; // 4096
+pub const CHUNK_SIZE: usize = CHUNK_PART_SIZE * CHUNK_PARTS; // 1MiB
 
 #[instrument(level = "trace", skip(writer, key, message))]
 pub async fn send_message<W: AsyncWrite + Unpin>(
@@ -31,7 +32,7 @@ pub async fn send_message<W: AsyncWrite + Unpin>(
         message: Message,
         flush: bool,
     ) -> Result<()> {
-        let message_bytes = bincode::serialize(&message)?;
+        let message_bytes = message.serialize_to(stream);
         let (nonce, encrypted_data) = crate::crypto::encrypt(key, &message_bytes)?;
 
         writer.write_u32_le(encrypted_data.len() as u32).await?;

@@ -33,7 +33,11 @@ pub async fn ecdh_handshake<R: AsyncRead + AsyncWrite + Unpin>(mut stream: R) ->
     Ok(key)
 }
 
+
+
+
 pub fn encrypt(key: &Key, data: &[u8]) -> Result<(XNonce, Box<[u8]>)> {
+
     let nonce = XChaCha20Poly1305::generate_nonce(&mut OsRng);
     let cipher = XChaCha20Poly1305::new(key.into());
     let encrypted_data = cipher

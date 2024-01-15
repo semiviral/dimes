@@ -6,6 +6,8 @@ use std::net::SocketAddr;
 pub struct Cfg {
     pub server: Server,
     pub storage: Storage,
+    pub pooling: Pooling,
+    pub queuing: Queuing,
 }
 
 #[derive(Debug, Deserialize)]
@@ -16,7 +18,17 @@ pub struct Server {
 #[derive(Debug, Deserialize)]
 pub struct Storage {
     pub url: String,
-    pub chunks: u64,
+    pub chunks: usize,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Pooling {
+    pub chunks: usize,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Queuing {
+    pub send: usize,
 }
 
 pub fn get() -> &'static Cfg {
