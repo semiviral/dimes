@@ -9,7 +9,7 @@ anyhow = "*"
 tracing = "*"
 tracing-subscriber = { version = "*", features = ["parking_lot"] }
 
-chacha20poly1305 = { version = "*", features = ["stream"] }
+chacha20poly1305 = "*"
 x25519-dalek = "*"
 blake2 = "*"
 rand = "*"
@@ -18,4 +18,6 @@ tokio = { version = "*", features = ["full"] }
 serde = { version = "*", features = ["derive"] }
 serde_arrays = "*"
 uuid = { version = "*", features = ["v4", "v7", "fast-rng", "serde"] }
-bincode = "*"
+once_cell = "*"
+async-trait = "*"
+deadpool = { version = "*", features = ["rt_tokio_1"] }

@@ -1,19 +1,18 @@
 use anyhow::Result;
 use blake2::digest::{Update, VariableOutput};
-use chacha20poly1305::{aead::Aead, AeadCore, KeyInit, Nonce, XChaCha20Poly1305, XNonce};
+use chacha20poly1305::{aead::Buffer, AeadCore, AeadInPlace, XChaCha20Poly1305, XNonce};
 use rand::rngs::OsRng;
 use tokio::io::{AsyncRead, AsyncWrite};
 use x25519_dalek::{EphemeralSecret, PublicKey};
 
 const XCHACHA20_POLY1305_KEY_SIZE: usize = 32;
-const XCHACHA20_POLY1305_NONCE_SIZE: usize = 24;
 
 pub type Key = [u8; XCHACHA20_POLY1305_KEY_SIZE];
 
 pub async fn ecdh_handshake<R: AsyncRead + AsyncWrite + Unpin>(mut stream: R) -> Result<Key> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-    let private_key = EphemeralSecret::random_from_rng(&mut OsRng);
+    let private_key = EphemeralSecret::random_from_rng(OsRng);
     let public_key = PublicKey::from(&private_key);
 
     stream.write_all(public_key.as_bytes()).await?;
@@ -33,25 +32,22 @@ pub async fn ecdh_handshake<R: AsyncRead + AsyncWrite + Unpin>(mut stream: R) ->
     Ok(key)
 }
 
-
-
-
-pub fn encrypt(key: &Key, data: &[u8]) -> Result<(XNonce, Box<[u8]>)> {
-
+pub fn encrypt(cipher: &XChaCha20Poly1305, data: &[u8], buffer: &mut dyn Buffer) -> Result<XNonce> {
     let nonce = XChaCha20Poly1305::generate_nonce(&mut OsRng);
-    let cipher = XChaCha20Poly1305::new(key.into());
-    let encrypted_data = cipher
-        .encrypt(&nonce, data)
-        .map_err(|err| anyhow!("Encryption error: {}", err))?;
+    cipher
+        .encrypt_in_place(&nonce, data, buffer)
+        .map_err(|e| anyhow!(e))?;
 
-    Ok((nonce.into(), encrypted_data.into_boxed_slice()))
+    Ok(nonce)
 }
 
-pub fn decrypt(key: &Key, nonce: &XNonce, data: &[u8]) -> Result<Box<[u8]>> {
-    let cipher = XChaCha20Poly1305::new(key.into());
-    let decrypted_data = cipher
-        .decrypt(nonce.into(), data)
-        .map_err(|err| anyhow!("Decryption error: {}", err))?;
-
-    Ok(decrypted_data.into_boxed_slice())
+pub fn decrypt(
+    cipher: &XChaCha20Poly1305,
+    nonce: &XNonce,
+    data: &[u8],
+    buffer: &mut dyn Buffer,
+) -> Result<()> {
+    cipher
+        .decrypt_in_place(nonce, data, buffer)
+        .map_err(|e| anyhow!(e))
 }

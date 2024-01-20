@@ -36,3 +36,4 @@ sqlx = { version = "*", features = [
 uuid = { version = "*", features = ["v7", "fast-rng"] }
 rand = "*"
 sha2 = "*"
+chacha20poly1305 = "*"

@@ -1,75 +1,133 @@
-use crate::net::types::{ChunkHash, ChunkPart};
+use crate::{
+    pools::{get_string_buf, ManagedString},
+    ChunkHash, ChunkPart,
+};
 use anyhow::Result;
-use tokio::io::{AsyncWrite, AsyncWriteExt};
+use std::mem::{size_of, Discriminant};
 use uuid::Uuid;
 
 #[repr(u32)]
 #[derive(Debug)]
 pub enum Message {
-    Hello([u8; 16]) = 0,
-    Echo([u8; 16]) = 1,
+    Hello([u8; 16]) = Self::HELLO,
+    Echo([u8; 16]) = Self::ECHO,
 
-    Ok = 2,
+    Ok = Self::OK,
 
-    Ping = 20,
-    Pong = 21,
+    Ping = Self::PING,
+    Pong = Self::PONG,
 
     ShardInfo {
         id: Uuid,
-        agent: String,
+        agent: ManagedString,
         chunks: u64,
-    } = 2000,
+    } = Self::SHARD_INFO,
 
-    ShardShutdown = 1000,
+    ShardShutdown = Self::SHARD_SHUTDOWN,
 
     PrepareStore {
         hash: ChunkHash,
-    } = 6000,
+    } = Self::PREPARE_STORE,
 
-    AlreadyStoring {
+    ExistingStore {
         hash: ChunkHash,
-    } = 5000,
+    } = Self::EXISTING_STORE,
 
     PrepareStock {
         hash: ChunkHash,
-    } = 6001,
+    } = Self::PREPARE_STOCK,
 
     ChunkPart {
         hash: ChunkHash,
         part: ChunkPart,
-    } = 6002,
+    } = Self::CHUNK_PART,
 }
 
+#[allow(clippy::inconsistent_digit_grouping)]
 impl Message {
-    pub async fn serialize_to(self, mut stream: impl AsyncWrite + Unpin) -> Result<()> {
-        // SAFETY: The discriminant value is the first value in the struct's memory representation.
-        let discriminant = unsafe { (&self as *const Self as *const u32).read() };
-        stream.write_u32_le(discriminant).await?;
+    const OK: u32 = 0;
+    const HELLO: u32 = 1_0_000;
+    const ECHO: u32 = 1_0_001;
+    const PING: u32 = 1_0_002;
+    const PONG: u32 = 1_0_003;
+    const SHARD_INFO: u32 = 2_0_000;
+    const SHARD_SHUTDOWN: u32 = 2_1_000;
+    const PREPARE_STORE: u32 = 3_0_000;
+    const PREPARE_STOCK: u32 = 3_0_001;
+    const EXISTING_STORE: u32 = 3_1_000;
+    const CHUNK_PART: u32 = 3_0_010;
 
-        match self {
-            Self::Hello(stamp) | Self::Echo(stamp) => {
-                stream.write_all(&stamp).await?;
+    pub async fn deserialize(bytes: &[u8]) -> Result<Self> {
+        let (discriminant, raw) = bytes.split_at(std::mem::size_of::<Discriminant<Message>>());
+        let discriminant = u32::from_le_bytes(discriminant.try_into().unwrap());
+
+        match discriminant {
+            Self::OK => Ok(Self::Ok),
+
+            Self::HELLO => Ok(Self::Hello(raw.try_into().expect("wrong data length"))),
+            Self::ECHO => Ok(Self::Echo(raw.try_into().expect("wrong data length"))),
+
+            Self::PING => Ok(Self::Ping),
+            Self::PONG => Ok(Self::Pong),
+
+            Self::SHARD_INFO => {
+                let (id_bytes, raw) = raw.split_at(size_of::<Uuid>());
+                let id = Uuid::from_bytes_le(id_bytes.try_into().unwrap());
+
+                let (agent_str_len_bytes, raw) = raw.split_at(size_of::<u32>());
+                let agent_str_len = u64::from_le_bytes(agent_str_len_bytes.try_into().unwrap());
+
+                let (agent_str_bytes, chunks_bytes) = raw.split_at(agent_str_len as usize);
+                let agent_str =
+                    std::str::from_utf8(agent_str_bytes).expect("received invalid agent string");
+                let mut agent = get_string_buf().await;
+                agent.push_str(agent_str);
+
+                let chunks = u64::from_le_bytes(chunks_bytes.try_into().unwrap());
+
+                Ok(Self::ShardInfo { id, agent, chunks })
             }
 
+            discriminant => bail!("Unknown discriminant: {discriminant}"),
+        }
+    }
+
+    pub fn serialize(self, buf: &mut Vec<u8>) -> Result<()> {
+        debug_assert!(buf.is_empty());
+
+        // SAFETY: The discriminant value is the first value in the struct's memory representation.
+        let discriminant = unsafe { (&self as *const Self as *const u32).read() };
+        buf.extend_from_slice(&discriminant.to_le_bytes());
+
+        match self {
             Self::Ok | Self::Ping | Self::Pong | Self::ShardShutdown => {
                 // do nothing
             }
 
+            Self::Hello(stamp) | Self::Echo(stamp) => {
+                buf.extend_from_slice(&stamp);
+            }
+
             Self::ShardInfo { id, agent, chunks } => {
-                stream.write_all(&id.to_bytes_le()).await?;
-                stream.write_all(agent.as_bytes()).await?;
-                stream.write_all(&chunks.to_be_bytes()).await?;
+                let agent_bytes = agent.as_bytes();
+                let agent_bytes_len = (agent_bytes.len() as u64).to_le_bytes();
+
+                buf.extend_from_slice(&id.to_bytes_le());
+                buf.extend_from_slice(&agent_bytes_len);
+                buf.extend_from_slice(agent_bytes);
+                buf.extend_from_slice(&chunks.to_le_bytes());
             }
 
             Self::PrepareStore { hash }
-            | Self::AlreadyStoring { hash }
+            | Self::ExistingStore { hash }
             | Self::PrepareStock { hash } => {
-                stream.write_all(&hash.into_bytes()).await?;
+                buf.extend_from_slice(&hash.into_bytes());
             }
 
             Self::ChunkPart { hash, part } => {
-                stream.write_all(&hash.into_bytes()).await?;
-                stream.write_all(&*part).await?;
+                buf.extend_from_slice(&hash.into_bytes());
+                buf.extend_from_slice(&(part.len() as u64).to_le_bytes());
+                buf.extend_from_slice(&*part);
             }
         }
 

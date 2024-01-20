@@ -24,6 +24,7 @@ pub struct Storage {
 #[derive(Debug, Deserialize)]
 pub struct Pooling {
     pub chunks: usize,
+    pub crypto: usize,
 }
 
 #[derive(Debug, Deserialize)]

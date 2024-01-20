@@ -1,6 +1,6 @@
-use crate::{crypto::Key, error::unexpected_message};
+use crate::{error::unexpected_message, pools::get_message_buf};
 use anyhow::Result;
-use chacha20poly1305::XNonce;
+use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tracing::Level;
@@ -9,111 +9,89 @@ use uuid::Uuid;
 mod message;
 pub use message::*;
 
-mod types;
-pub use types::*;
+pub const MESSAGE_TIMEOUT: Duration = Duration::from_secs(3);
+pub const MAX_TIMEOUT: Duration = Duration::MAX;
 
-pub const MESSAGE_TIMEOUT: Option<Duration> = Some(Duration::from_secs(3));
-
-pub const CHUNK_PARTS: usize = 0x100; // 256
-pub const CHUNK_PART_SIZE: usize = 0x1000; // 4096
-pub const CHUNK_SIZE: usize = CHUNK_PART_SIZE * CHUNK_PARTS; // 1MiB
-
-#[instrument(level = "trace", skip(writer, key, message))]
+#[instrument(level = "trace", skip(writer, cipher))]
 pub async fn send_message<W: AsyncWrite + Unpin>(
-    writer: W,
-    key: &Key,
+    mut writer: W,
+    cipher: &XChaCha20Poly1305,
     message: Message,
-    timeout: Option<Duration>,
+    timeout: Duration,
     flush: bool,
 ) -> Result<()> {
-    async fn send_message_inner<W: AsyncWrite + Unpin>(
-        mut writer: W,
-        key: &Key,
-        message: Message,
-        flush: bool,
-    ) -> Result<()> {
-        let message_bytes = message.serialize_to(stream);
-        let (nonce, encrypted_data) = crate::crypto::encrypt(key, &message_bytes)?;
+    tokio::time::timeout(timeout, async {
+        let mut message_buf = get_message_buf().await;
+        let mut encryption_buf = get_message_buf().await;
 
-        writer.write_u32_le(encrypted_data.len() as u32).await?;
+        message
+            .serialize(&mut message_buf)
+            .expect("failed to serialize message");
+
+        let nonce = crate::crypto::encrypt(cipher, &message_buf, &mut *encryption_buf)?;
+
+        event!(Level::TRACE, ?nonce);
+
+        writer.write_u32_le(encryption_buf.len() as u32).await?;
         writer.write_all(nonce.as_slice()).await?;
-        writer.write_all(&encrypted_data).await?;
-
-        event!(Level::TRACE,
-            raw = ?message,
-            crypted_len = %encrypted_data.len(),
-            nonce = %format!("{nonce:X?}")
-        );
+        writer.write_all(&encryption_buf).await?;
 
         if flush {
             writer.flush().await?;
         }
 
-        Ok(())
-    }
+        Result::<()>::Ok(())
+    })
+    .await??;
 
-    let send_message = send_message_inner(writer, key, message, flush);
-    match timeout {
-        Some(timeout) => tokio::time::timeout(timeout, send_message).await?,
-
-        None => send_message.await,
-    }
+    Ok(())
 }
 
-#[instrument(level = "trace", skip(reader, key))]
+#[instrument(level = "trace", skip(reader, cipher))]
 pub async fn receive_message<R: AsyncRead + Unpin>(
-    reader: R,
-    key: &Key,
-    timeout: Option<Duration>,
+    mut reader: R,
+    cipher: impl AsRef<XChaCha20Poly1305>,
+    timeout: Duration,
 ) -> Result<Message> {
-    pub async fn receive_message_inner<R: AsyncRead + Unpin>(
-        mut reader: R,
-        key: &Key,
-    ) -> Result<Message> {
-        let len = reader.read_u32_le().await? as usize;
+    tokio::time::timeout(timeout, async {
+        let mut message_buf = get_message_buf().await;
+        let mut decryption_buf = get_message_buf().await;
+
+        let data_len = reader.read_u32_le().await? as usize;
         let mut nonce = XNonce::default();
         reader.read_exact(&mut nonce).await?;
+        reader.read_exact(&mut decryption_buf).await?;
 
-        let mut data = vec![0u8; len];
-        let read_len = reader.read_exact(&mut data).await?;
-        assert_eq!(read_len, len);
+        crate::crypto::decrypt(cipher.as_ref(), &nonce, &decryption_buf, &mut *message_buf)?;
 
-        let decrypted_bytes = crate::crypto::decrypt(key, &nonce, &data)?;
-        let message = bincode::deserialize(&decrypted_bytes)?;
-
-        event!(Level::TRACE, raw = ?message, crypted_len = %decrypted_bytes.len(), nonce = %format!("{nonce:X?}"));
+        let message = Message::deserialize(&message_buf).await?;
+        event!(Level::TRACE, ?message, ?data_len, ?nonce);
 
         Ok(message)
-    }
-
-    let receive_message = receive_message_inner(reader, key);
-    match timeout {
-        Some(timeout) => tokio::time::timeout(timeout, receive_message).await?,
-
-        None => receive_message.await,
-    }
+    })
+    .await?
 }
 
-pub async fn negotiate_hello<S: AsyncRead + AsyncWrite + Unpin>(
-    mut stream: S,
-    key: &Key,
+pub async fn negotiate_hello(
+    mut stream: impl AsyncRead + AsyncWrite + Unpin,
+    cipher: impl AsRef<XChaCha20Poly1305>,
 ) -> Result<()> {
     let stamp = Uuid::new_v4().into_bytes();
 
     send_message(
         &mut stream,
-        key,
+        cipher.as_ref(),
         Message::Hello(stamp),
         MESSAGE_TIMEOUT,
         true,
     )
     .await?;
 
-    match receive_message(&mut stream, key, MESSAGE_TIMEOUT).await? {
+    match receive_message(&mut stream, &cipher, MESSAGE_TIMEOUT).await? {
         Message::Hello(stamp) => {
             send_message(
                 &mut stream,
-                key,
+                cipher.as_ref(),
                 Message::Echo(stamp),
                 MESSAGE_TIMEOUT,
                 true,
@@ -124,7 +102,7 @@ pub async fn negotiate_hello<S: AsyncRead + AsyncWrite + Unpin>(
         message => unexpected_message("Message::Hello", message),
     }?;
 
-    match receive_message(&mut stream, key, MESSAGE_TIMEOUT).await? {
+    match receive_message(&mut stream, &cipher, MESSAGE_TIMEOUT).await? {
         Message::Echo(restamp) if restamp == stamp => Ok(()),
 
         Message::Echo(restamp) => {
@@ -135,10 +113,20 @@ pub async fn negotiate_hello<S: AsyncRead + AsyncWrite + Unpin>(
     }
 }
 
-pub async fn ping_pong<S: AsyncRead + AsyncWrite + Unpin>(mut stream: S, key: &Key) -> Result<()> {
-    send_message(&mut stream, key, Message::Ping, MESSAGE_TIMEOUT, true).await?;
+pub async fn ping_pong(
+    mut stream: impl AsyncRead + AsyncWrite + Unpin,
+    cipher: impl AsRef<XChaCha20Poly1305>,
+) -> Result<()> {
+    send_message(
+        &mut stream,
+        cipher.as_ref(),
+        Message::Ping,
+        MESSAGE_TIMEOUT,
+        true,
+    )
+    .await?;
 
-    match receive_message(&mut stream, key, MESSAGE_TIMEOUT).await? {
+    match receive_message(&mut stream, &cipher, MESSAGE_TIMEOUT).await? {
         Message::Pong => Ok(()),
         message => unexpected_message("Message::Pong", message),
     }

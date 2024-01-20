@@ -1,6 +1,7 @@
 use anyhow::Result;
-use lib::net::types::ShardInfo;
 use sqlx::PgPool;
+
+use crate::net::shards::ShardInfo;
 
 #[derive(Debug)]
 pub struct DbStore {

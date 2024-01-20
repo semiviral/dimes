@@ -4,16 +4,12 @@ extern crate tracing;
 extern crate anyhow;
 
 mod cfg;
-mod pools;
 
 use anyhow::Result;
+use chacha20poly1305::{KeyInit, XChaCha20Poly1305};
 use lib::{
-    crypto::Key,
-    net::{
-        receive_message, send_message,
-        types::{ChunkHash, ShardInfo},
-        Message, MESSAGE_TIMEOUT,
-    },
+    net::{receive_message, send_message, Message, MAX_TIMEOUT, MESSAGE_TIMEOUT},
+    ChunkHash,
 };
 use once_cell::sync::Lazy;
 use std::{collections::BTreeMap, ops::Deref, sync::Arc, time::Duration};
@@ -29,12 +25,19 @@ use uuid::Uuid;
 
 static ID: Lazy<Uuid> = Lazy::new(Uuid::now_v7);
 
-fn agent() -> String {
-    format!("dimese-shard/{}", env!("CARGO_PKG_VERSION"))
+fn agent_str() -> &'static str {
+    concat!("dimese-shard/", env!("CARGO_PKG_VERSION"))
 }
 
-fn info() -> ShardInfo {
-    ShardInfo::new(*ID, agent(), cfg::get().storage.chunks).unwrap()
+async fn info_message() -> Message {
+    let mut agent = lib::pools::get_string_buf().await;
+    agent.push_str(agent_str());
+
+    Message::ShardInfo {
+        id: *ID,
+        agent,
+        chunks: cfg::get().storage.chunks.try_into().unwrap(),
+    }
 }
 
 #[tokio::main]
@@ -55,7 +58,7 @@ async fn main() {
 async fn run() -> Result<()> {
     trace!("Attempting to connect to server...");
 
-    let (stream, key) = connect_server().await?;
+    let (stream, cipher) = connect_server().await?;
 
     use tokio::sync::mpsc::channel;
     let (reader, writer) = stream.into_split();
@@ -65,15 +68,15 @@ async fn run() -> Result<()> {
     let (send_queue, recv_queue) = channel(cfg::get().queuing.send);
     let send_queue = Arc::new(send_queue);
 
-    tokio::spawn(process_writes(writer, recv_queue, key));
+    tokio::spawn(process_writes(writer, recv_queue, Arc::clone(&cipher)));
 
     loop {
-        let message = receive_message(&mut reader, &key, None).await?;
+        let message = receive_message(&mut reader, &cipher, MAX_TIMEOUT).await?;
         tokio::spawn(process_message(Arc::clone(&send_queue), message));
     }
 }
 
-async fn connect_server() -> Result<(TcpStream, Key)> {
+async fn connect_server() -> Result<(TcpStream, Arc<XChaCha20Poly1305>)> {
     let server_addr = cfg::get().server.address;
 
     let mut stream = loop {
@@ -91,21 +94,26 @@ async fn connect_server() -> Result<(TcpStream, Key)> {
     };
 
     trace!("Negotiating ECDH shared secret with server...");
-    let key = lib::crypto::ecdh_handshake(&mut stream).await?;
+    let cipher = {
+        let key = lib::crypto::ecdh_handshake(&mut stream).await?;
+        let cipher = XChaCha20Poly1305::new(&key.into());
 
-    lib::net::negotiate_hello(&mut stream, &key).await?;
+        Arc::new(cipher)
+    };
+
+    lib::net::negotiate_hello(&mut stream, &cipher).await?;
 
     // Send info block to server.
     send_message(
         &mut stream,
-        &key,
-        Message::ShardInfo(info()),
+        &cipher,
+        info_message().await,
         MESSAGE_TIMEOUT,
         true,
     )
     .await?;
 
-    Ok((stream, key))
+    Ok((stream, cipher))
 }
 
 static STORING_CHUNKS: RwLock<BTreeMap<ChunkHash, Mutex<Box<[u8]>>>> =
@@ -117,19 +125,23 @@ pub enum WriteCommand {
     Flush,
 }
 
-#[instrument(skip(writer, recv_queue, key))]
+#[instrument(skip(writer, recv_queue, cipher))]
 async fn process_writes(
     mut writer: impl AsyncWrite + Unpin,
     mut recv_queue: Receiver<WriteCommand>,
-    key: Key,
+    cipher: impl AsRef<XChaCha20Poly1305>,
 ) {
     while let Some(command) = recv_queue.recv().await {
         match command {
-            WriteCommand::Send(message) => {
-                send_message(&mut writer, &key, message, MESSAGE_TIMEOUT, false)
-                    .await
-                    .expect("failed to write message to stream")
-            }
+            WriteCommand::Send(message) => send_message(
+                &mut writer,
+                cipher.as_ref(),
+                message,
+                MESSAGE_TIMEOUT,
+                false,
+            )
+            .await
+            .expect("failed to write message to stream"),
 
             WriteCommand::Flush => writer.flush().await.expect("failed to flush write stream"),
         }
@@ -144,9 +156,7 @@ async fn process_message(send_queue: impl Deref<Target = Sender<WriteCommand>>, 
             .await
             .expect("failed to send ping"),
 
-            Message::PrepareStore { hash } => {
-                
-            }
+        Message::PrepareStore { hash: _ } => {}
 
         message => error!("Unexpected message, cannot cope: {message:?}"),
     }
