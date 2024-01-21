@@ -48,9 +48,9 @@ pub async fn send_message<W: AsyncWrite + Unpin>(
 }
 
 #[instrument(level = "trace", skip(reader, cipher))]
-pub async fn receive_message<R: AsyncRead + Unpin>(
+pub async fn receive_message<R: AsyncRead + Unpin, C: AsRef<XChaCha20Poly1305>>(
     mut reader: R,
-    cipher: impl AsRef<XChaCha20Poly1305>,
+    cipher: C,
     timeout: Duration,
 ) -> Result<Message> {
     tokio::time::timeout(timeout, async {
@@ -72,9 +72,9 @@ pub async fn receive_message<R: AsyncRead + Unpin>(
     .await?
 }
 
-pub async fn negotiate_hello(
-    mut stream: impl AsyncRead + AsyncWrite + Unpin,
-    cipher: impl AsRef<XChaCha20Poly1305>,
+pub async fn negotiate_hello<S: AsyncRead + AsyncWrite + Unpin, C: AsRef<XChaCha20Poly1305>>(
+    mut stream: S,
+    cipher: C,
 ) -> Result<()> {
     let stamp = Uuid::new_v4().into_bytes();
 
@@ -113,9 +113,9 @@ pub async fn negotiate_hello(
     }
 }
 
-pub async fn ping_pong(
-    mut stream: impl AsyncRead + AsyncWrite + Unpin,
-    cipher: impl AsRef<XChaCha20Poly1305>,
+pub async fn ping_pong<S: AsyncRead + AsyncWrite + Unpin, C: AsRef<XChaCha20Poly1305>>(
+    mut stream: S,
+    cipher: C,
 ) -> Result<()> {
     send_message(
         &mut stream,

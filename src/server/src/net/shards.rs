@@ -8,7 +8,7 @@ use lib::{
 };
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tokio::{
-    io::BufStream,
+    io::{AsyncRead, AsyncWrite, BufStream},
     net::{TcpListener, TcpStream},
     time::sleep,
 };
@@ -24,12 +24,12 @@ pub async fn accept_connections(listener: TcpListener, ctoken: &CancellationToke
         let peer_ctoken = ctoken.child_token();
 
         tokio::spawn(async move {
-            let (peer_stream, peer_key, peer_id) =
+            let (peer_stream, peer_cipher, peer_id) =
                 spawn_peer(peer_address, peer_socket, &peer_ctoken)
                     .await
                     .expect("error spawning peer");
 
-            listen_peer(peer_id, peer_ctoken, peer_stream, peer_key)
+            listen_peer(peer_stream, peer_cipher, peer_id, peer_ctoken)
                 .await
                 .expect("error listening to peer");
         });
@@ -73,11 +73,11 @@ async fn spawn_peer(
 }
 
 #[instrument(skip(ctoken, stream, cipher))]
-async fn listen_peer(
+async fn listen_peer<S: AsyncRead + AsyncWrite + Unpin, C: AsRef<XChaCha20Poly1305>>(
+    mut stream: S,
+    cipher: C,
     id: Uuid,
     ctoken: CancellationToken,
-    mut stream: BufStream<TcpStream>,
-    cipher: impl AsRef<XChaCha20Poly1305>,
 ) -> Result<()> {
     let ping_wait = Duration::from_millis(cfg::get().interval.ping);
 

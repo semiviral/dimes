@@ -1,14 +1,12 @@
 use anyhow::Result;
 use chacha20poly1305::{KeyInit, XChaCha20Poly1305};
 use lib::net::{receive_message, send_message, Message, MAX_TIMEOUT, MESSAGE_TIMEOUT};
-use once_cell::sync::Lazy;
 use std::{sync::Arc, time::Duration};
 use tokio::{
     io::{AsyncWrite, AsyncWriteExt, BufReader, BufWriter},
     net::TcpStream,
     sync::mpsc::{Receiver, Sender},
 };
-use uuid::Uuid;
 
 #[macro_use]
 extern crate tracing;
@@ -16,10 +14,8 @@ extern crate tracing;
 extern crate anyhow;
 
 mod cfg;
+mod id;
 mod storage;
-
-// TODO generate ID to/from redis database
-static ID: Lazy<Uuid> = Lazy::new(Uuid::now_v7);
 
 fn agent_str() -> &'static str {
     concat!("dimese-shard/", env!("CARGO_PKG_VERSION"))
@@ -30,9 +26,9 @@ async fn info_message() -> Message {
     agent.push_str(agent_str());
 
     Message::ShardInfo {
-        id: *ID,
+        id: id::get().await,
         agent,
-        chunks: cfg::get().storage.chunks.try_into().unwrap(),
+        chunks: cfg::get().storage.chunks,
     }
 }
 
@@ -61,10 +57,10 @@ async fn run() -> Result<()> {
     let mut reader = BufReader::new(reader);
     let writer = BufWriter::new(writer);
 
-    let (send_queue, recv_queue) = channel(cfg::get().queuing.send.into());
+    let (send_queue, recv_queue) = channel(cfg::get().caching.queues.into());
     let send_queue = Arc::new(send_queue);
 
-    tokio::spawn(process_writes(writer, recv_queue, Arc::clone(&cipher)));
+    tokio::spawn(process_writes(writer, Arc::clone(&cipher), recv_queue));
 
     loop {
         let message = receive_message(&mut reader, &cipher, MAX_TIMEOUT).await?;
@@ -119,10 +115,10 @@ pub enum WriteCommand {
 }
 
 #[instrument(skip(writer, recv_queue, cipher))]
-async fn process_writes(
-    mut writer: impl AsyncWrite + Unpin,
+async fn process_writes<W: AsyncWrite + Unpin, C: AsRef<XChaCha20Poly1305>>(
+    mut writer: W,
+    cipher: C,
     mut recv_queue: Receiver<WriteCommand>,
-    cipher: impl AsRef<XChaCha20Poly1305>,
 ) {
     while let Some(command) = recv_queue.recv().await {
         match command {
@@ -142,7 +138,7 @@ async fn process_writes(
 }
 
 #[instrument(skip(send_queue))]
-async fn process_message(send_queue: impl AsRef<Sender<WriteCommand>>, message: Message) {
+async fn process_message<Q: AsRef<Sender<WriteCommand>>>(send_queue: Q, message: Message) {
     match message {
         Message::Ping => send_queue
             .as_ref()
