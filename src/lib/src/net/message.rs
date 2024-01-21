@@ -20,7 +20,7 @@ pub enum Message {
     ShardInfo {
         id: Uuid,
         agent: ManagedString,
-        chunks: u64,
+        chunks: u32,
     } = Self::SHARD_INFO,
 
     ShardShutdown = Self::SHARD_SHUTDOWN,
@@ -83,7 +83,7 @@ impl Message {
                 let mut agent = get_string_buf().await;
                 agent.push_str(agent_str);
 
-                let chunks = u64::from_le_bytes(chunks_bytes.try_into().unwrap());
+                let chunks = u32::from_le_bytes(chunks_bytes.try_into().unwrap());
 
                 Ok(Self::ShardInfo { id, agent, chunks })
             }

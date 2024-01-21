@@ -29,21 +29,21 @@ impl ChunkHash {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ShardInfo<'a> {
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct ShardInfo {
     id: Uuid,
-    agent: &'a str,
-    max_chunks: i64,
+    agent: ManagedString,
+    chunks: i64,
 }
 
-impl<'a> ShardInfo<'a> {
+impl ShardInfo {
     #[inline]
-    pub fn new(id: Uuid, agent: impl AsRef<str> + 'a, max_chunks: usize) -> anyhow::Result<Self> {
-        Ok(Self {
+    pub fn new(id: Uuid, agent: ManagedString, chunks: u32) -> Self {
+        Self {
             id,
-            agent: agent.as_ref(),
-            max_chunks: max_chunks.try_into()?,
-        })
+            agent,
+            chunks: chunks.into(),
+        }
     }
 
     #[inline]
@@ -53,11 +53,11 @@ impl<'a> ShardInfo<'a> {
 
     #[inline]
     pub fn agent(&self) -> &str {
-        self.agent.as_ref()
+        self.agent.as_str()
     }
 
     #[inline]
-    pub fn max_chunks(&self) -> i64 {
-        self.max_chunks
+    pub fn chunks(&self) -> i64 {
+        self.chunks
     }
 }

@@ -1,28 +1,24 @@
+use anyhow::Result;
+use chacha20poly1305::{KeyInit, XChaCha20Poly1305};
+use lib::net::{receive_message, send_message, Message, MAX_TIMEOUT, MESSAGE_TIMEOUT};
+use once_cell::sync::Lazy;
+use std::{sync::Arc, time::Duration};
+use tokio::{
+    io::{AsyncWrite, AsyncWriteExt, BufReader, BufWriter},
+    net::TcpStream,
+    sync::mpsc::{Receiver, Sender},
+};
+use uuid::Uuid;
+
 #[macro_use]
 extern crate tracing;
 #[macro_use]
 extern crate anyhow;
 
 mod cfg;
+mod storage;
 
-use anyhow::Result;
-use chacha20poly1305::{KeyInit, XChaCha20Poly1305};
-use lib::{
-    net::{receive_message, send_message, Message, MAX_TIMEOUT, MESSAGE_TIMEOUT},
-    ChunkHash,
-};
-use once_cell::sync::Lazy;
-use std::{collections::BTreeMap, ops::Deref, sync::Arc, time::Duration};
-use tokio::{
-    io::{AsyncWrite, AsyncWriteExt, BufReader, BufWriter},
-    net::TcpStream,
-    sync::{
-        mpsc::{Receiver, Sender},
-        Mutex, RwLock,
-    },
-};
-use uuid::Uuid;
-
+// TODO generate ID to/from redis database
 static ID: Lazy<Uuid> = Lazy::new(Uuid::now_v7);
 
 fn agent_str() -> &'static str {
@@ -65,7 +61,7 @@ async fn run() -> Result<()> {
     let mut reader = BufReader::new(reader);
     let writer = BufWriter::new(writer);
 
-    let (send_queue, recv_queue) = channel(cfg::get().queuing.send);
+    let (send_queue, recv_queue) = channel(cfg::get().queuing.send.into());
     let send_queue = Arc::new(send_queue);
 
     tokio::spawn(process_writes(writer, recv_queue, Arc::clone(&cipher)));
@@ -116,9 +112,6 @@ async fn connect_server() -> Result<(TcpStream, Arc<XChaCha20Poly1305>)> {
     Ok((stream, cipher))
 }
 
-static STORING_CHUNKS: RwLock<BTreeMap<ChunkHash, Mutex<Box<[u8]>>>> =
-    RwLock::const_new(BTreeMap::new());
-
 #[allow(clippy::large_enum_variant)]
 pub enum WriteCommand {
     Send(Message),
@@ -149,9 +142,10 @@ async fn process_writes(
 }
 
 #[instrument(skip(send_queue))]
-async fn process_message(send_queue: impl Deref<Target = Sender<WriteCommand>>, message: Message) {
+async fn process_message(send_queue: impl AsRef<Sender<WriteCommand>>, message: Message) {
     match message {
         Message::Ping => send_queue
+            .as_ref()
             .send(WriteCommand::Send(Message::Pong))
             .await
             .expect("failed to send ping"),

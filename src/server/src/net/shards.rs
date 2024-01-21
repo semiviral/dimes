@@ -4,7 +4,7 @@ use chacha20poly1305::{KeyInit, XChaCha20Poly1305};
 use lib::{
     error::unexpected_message,
     net::{ping_pong, receive_message, Message, MAX_TIMEOUT, MESSAGE_TIMEOUT},
-    pools::ManagedString, ShardInfo,
+    ShardInfo,
 };
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tokio::{
@@ -53,7 +53,7 @@ async fn spawn_peer(
     lib::net::negotiate_hello(&mut stream, &cipher).await?;
 
     let info = match receive_message(&mut stream, &cipher, MESSAGE_TIMEOUT).await? {
-        Message::ShardInfo { id, agent, chunks } => Ok(ShardInfo::new(id, agent, max_chunks)),
+        Message::ShardInfo { id, agent, chunks } => Ok(ShardInfo::new(id, agent, chunks)),
         message => unexpected_message("Message::Info", message),
     }?;
 
@@ -64,12 +64,12 @@ async fn spawn_peer(
     drop(peer_ctokens);
 
     let pg_pool_read = crate::DB_STORE.read().await;
-    pg_pool_read.get().unwrap().add_shard(info).await?;
+    pg_pool_read.get().unwrap().add_shard(&info).await?;
     drop(pg_pool_read);
 
     debug!("Connected.");
 
-    Ok((stream, cipher, info.id))
+    Ok((stream, cipher, info.id()))
 }
 
 #[instrument(skip(ctoken, stream, cipher))]

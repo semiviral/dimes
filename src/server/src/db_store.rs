@@ -1,7 +1,6 @@
 use anyhow::Result;
+use lib::ShardInfo;
 use sqlx::PgPool;
-
-use crate::net::shards::ShardInfo;
 
 #[derive(Debug)]
 pub struct DbStore {
@@ -14,12 +13,12 @@ impl DbStore {
         Self { pool }
     }
 
-    pub async fn add_shard(&self, shard: ShardInfo) -> Result<()> {
+    pub async fn add_shard(&self, shard: &ShardInfo) -> Result<()> {
         query!(
             "INSERT INTO shards VALUES ($1, $2, $3, 0)",
             shard.id(),
             shard.agent(),
-            shard.max_chunks()
+            shard.chunks()
         )
         .execute(&self.pool)
         .await?;
