@@ -4,27 +4,26 @@ use std::net::SocketAddr;
 
 #[derive(Debug, Deserialize)]
 pub struct Cfg {
-    pub server: Server,
+    pub bind: Bind,
     pub storage: Storage,
-    pub caching: Caching,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct Server {
-    pub address: SocketAddr,
+pub struct Bind {
+    pub http: SocketAddr,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct Storage {
     pub url: String,
-    pub connections: u8,
-    pub chunks: u32,
+    pub chunks: u64,
+    pub connections: Connections,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct Caching {
-    pub chunks: usize,
-    pub queues: u16,
+pub struct Connections {
+    pub min: u32,
+    pub max: u32,
 }
 
 pub fn get() -> &'static Cfg {

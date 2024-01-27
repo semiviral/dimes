@@ -29,6 +29,7 @@ sqlx = { version = "*", features = [
     "time",
 ] }
 chrono = "*"
+directories = "*"
 
 once_cell = "*"
 uuid = { version = "*", features = ["v7", "fast-rng"] }

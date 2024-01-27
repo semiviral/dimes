@@ -6,10 +6,9 @@ pub fn routes() -> Router {
     Router::new().route("/info", get(info))
 }
 
-// TODO make this type general and / or public
 #[derive(Debug, Serialize)]
 struct Info {
-    pub chunks: u32,
+    pub chunks: u64,
 }
 
 impl Default for Info {
