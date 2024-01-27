@@ -1,38 +1,73 @@
-use crate::cfg;
 use anyhow::Result;
-use once_cell::sync::{Lazy, OnceCell};
-use redis::{aio::MultiplexedConnection, Client};
-use std::future::Future;
+use lib::Hash;
+use once_cell::sync::Lazy;
+use redis::{aio::MultiplexedConnection, cmd, AsyncCommands, Client, Cmd, ConnectionLike};
+use uuid::Uuid;
 
-static CLIENT: Lazy<Client> = Lazy::new(|| {
-    Client::open(cfg::get().storage.url.as_str()).expect("failed to open Redis client")
-});
-static CONNECTION: OnceCell<redis::aio::MultiplexedConnection> = OnceCell::new();
-
-pub async fn connect() -> Result<()> {
-    if let None = CONNECTION.get() {
-        let connection = CLIENT.get_multiplexed_async_connection().await?;
-
-        CONNECTION.set(connection).unwrap();
-    } else {
-        bail!("connection to Redis DB already established")
-    }
-
-    Ok(())
+#[derive(Debug, Clone)]
+pub struct Storage {
+    _client: Client,
+    connection: MultiplexedConnection,
 }
 
-pub async fn with_connection<
-    T,
-    R: Future<Output = T>,
-    F: FnOnce(MultiplexedConnection) -> R,
->(
-    with_fn: F,
-) -> T {
-    with_fn(
-        CONNECTION
-            .get()
-            .cloned()
-            .expect("connection to Redis DB has not been established"),
-    )
-    .await
+impl Storage {
+    pub async fn new<Str: AsRef<str>>(url: Str) -> Result<Self> {
+        let client = Client::open(url.as_ref())?;
+        let connection = client.get_multiplexed_async_connection().await?;
+
+        Ok(Self {
+            _client: client,
+            connection,
+        })
+    }
+
+    pub async fn get_id(&mut self) -> Uuid {
+        const SHARD_ID_KEY: &str = "SHARD_ID";
+
+        static ID_GET_CMD: Lazy<Cmd> = Lazy::new(|| {
+            let mut cmd = cmd("EXISTS");
+
+            cmd.arg(SHARD_ID_KEY);
+
+            cmd
+        });
+
+        static ID_SET_CMD: Lazy<Cmd> = Lazy::new(|| {
+            let mut cmd = cmd("SET");
+
+            cmd.arg(SHARD_ID_KEY)
+                .arg(Uuid::now_v7().simple().to_string())
+                .arg("NX");
+
+            cmd
+        });
+
+
+
+        let result: String = self
+            .connection
+            .send_packed_command(&ID_GET_CMD)
+            .await
+            .unwrap();
+
+        trace!("{:?}", result);
+
+        self.connection
+            .send_packed_command(&ID_GET_CMD)
+            .await
+            .unwrap();
+
+        let (high_bits, low_bits) = self.connection.get(SHARD_ID_KEY).await.unwrap();
+        Uuid::from_u64_pair(high_bits, low_bits)
+    }
+
+    #[instrument]
+    pub async fn get_chunk_exists(&mut self, hash: Hash) -> bool {
+        const CHUNK_HASHES_KEY: &str = "CHUNK_HASHES";
+
+        self.connection
+            .hexists(CHUNK_HASHES_KEY, &hash.into_bytes())
+            .await
+            .unwrap()
+    }
 }

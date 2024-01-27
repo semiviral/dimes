@@ -20,9 +20,9 @@ pub type ChunkPart = Box<[u8; CHUNK_PART_SIZE]>;
 
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct ChunkHash([u8; 16]);
+pub struct Hash([u8; 16]);
 
-impl ChunkHash {
+impl Hash {
     #[inline]
     pub const fn into_bytes(self) -> [u8; 16] {
         self.0

@@ -23,7 +23,7 @@ pub struct Storage {
 
 #[derive(Debug, Deserialize)]
 pub struct Caching {
-    pub chunks: u32,
+    pub chunks: usize,
     pub queues: u16,
 }
 

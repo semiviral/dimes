@@ -11,7 +11,6 @@ pub fn json<T: serde::Serialize>(item: T) -> Result<Response> {
     let body = serde_json::to_string(&item)?;
 
     let builder = default()
-        .header("Content-Length", body.len())
         .header("Content-Type", "application/json")
         .body(Body::from(body))?;
 

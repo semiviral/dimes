@@ -1,6 +1,6 @@
 use crate::{
     pools::{get_string_buf, ManagedString},
-    ChunkHash, ChunkPart,
+    Chunk, ChunkPart, Hash,
 };
 use anyhow::Result;
 use std::mem::{size_of, Discriminant};
@@ -25,22 +25,23 @@ pub enum Message {
 
     ShardShutdown = Self::SHARD_SHUTDOWN,
 
-    PrepareStore {
-        hash: ChunkHash,
-    } = Self::PREPARE_STORE,
+    Store {
+        hash: Hash,
+        chunk: Chunk,
+    } = Self::STORE,
 
-    ExistingStore {
-        hash: ChunkHash,
-    } = Self::EXISTING_STORE,
+    StoreExists {
+        hash: Hash,
+    } = Self::STORE_EXISTS,
 
-    PrepareStock {
-        hash: ChunkHash,
-    } = Self::PREPARE_STOCK,
+    Stock {
+        hash: Hash,
+        chunk: Chunk,
+    } = Self::STOCK,
 
-    ChunkPart {
-        hash: ChunkHash,
-        part: ChunkPart,
-    } = Self::CHUNK_PART,
+    RequestStock {
+        hash: Hash,
+    } = Self::REQUEST_STOCK,
 }
 
 #[allow(clippy::inconsistent_digit_grouping)]
@@ -52,10 +53,10 @@ impl Message {
     const PONG: u32 = 1_0_003;
     const SHARD_INFO: u32 = 2_0_000;
     const SHARD_SHUTDOWN: u32 = 2_1_000;
-    const PREPARE_STORE: u32 = 3_0_000;
-    const PREPARE_STOCK: u32 = 3_0_001;
-    const EXISTING_STORE: u32 = 3_1_000;
-    const CHUNK_PART: u32 = 3_0_010;
+    const STORE: u32 = 3_0_000;
+    const STOCK: u32 = 3_0_001;
+    const STORE_EXISTS: u32 = 3_1_000;
+    const REQUEST_STOCK: u32 = 3_0_010;
 
     pub async fn deserialize(bytes: &[u8]) -> Result<Self> {
         let (discriminant, raw) = bytes.split_at(std::mem::size_of::<Discriminant<Message>>());
@@ -109,25 +110,20 @@ impl Message {
             }
 
             Self::ShardInfo { id, agent, chunks } => {
-                let agent_bytes = agent.as_bytes();
-                let agent_bytes_len = (agent_bytes.len() as u64).to_le_bytes();
-
                 buf.extend_from_slice(&id.to_bytes_le());
-                buf.extend_from_slice(&agent_bytes_len);
-                buf.extend_from_slice(agent_bytes);
+                buf.extend_from_slice(&(agent.len() as u64).to_le_bytes());
+                buf.extend_from_slice(agent.as_bytes());
                 buf.extend_from_slice(&chunks.to_le_bytes());
             }
 
-            Self::PrepareStore { hash }
-            | Self::ExistingStore { hash }
-            | Self::PrepareStock { hash } => {
+            Self::Store { hash, chunk } | Self::Stock { hash, chunk } => {
                 buf.extend_from_slice(&hash.into_bytes());
+                buf.extend_from_slice(&(chunk.len() as u64).to_le_bytes());
+                buf.extend_from_slice(chunk.as_slice());
             }
 
-            Self::ChunkPart { hash, part } => {
+            Self::StoreExists { hash } | Self::RequestStock { hash } => {
                 buf.extend_from_slice(&hash.into_bytes());
-                buf.extend_from_slice(&(part.len() as u64).to_le_bytes());
-                buf.extend_from_slice(&*part);
             }
         }
 
