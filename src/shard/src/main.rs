@@ -1,5 +1,6 @@
 use directories::ProjectDirs;
 use once_cell::sync::Lazy;
+use postgrest::Postgrest;
 use std::{
     io::{Read, Seek, Write},
     path::PathBuf,
@@ -9,8 +10,6 @@ use uuid::Uuid;
 
 #[macro_use]
 extern crate tracing;
-#[macro_use]
-extern crate sqlx;
 
 mod api;
 mod cfg;
@@ -28,36 +27,7 @@ static PROJECT_PATH: Lazy<ProjectDirs> = Lazy::new(|| {
     }
 });
 
-static ID: Lazy<Uuid> = Lazy::new(|| {
-    let id_path = PROJECT_PATH.data_dir().join("shard-id");
-    let mut id_file = std::fs::File::options()
-        .create(true)
-        .read(true)
-        .write(true)
-        .open(id_path)
-        .expect("error opening shard ID file");
-
-    let mut buf = String::new();
-    id_file
-        .read_to_string(&mut buf)
-        .expect("failed to read shard ID file contents");
-
-    match Uuid::from_str(buf.as_str()) {
-        Ok(id) => id,
-
-        Err(_) => {
-            id_file.rewind().unwrap();
-            id_file.set_len(0).unwrap();
-
-            let id = Uuid::now_v7();
-            id_file
-                .write_all(id.as_hyphenated().to_string().as_bytes())
-                .expect("failed to write shard ID to file");
-
-            id
-        }
-    }
-});
+static ID: Lazy<Uuid> = Lazy::new(Uuid::new_v4);
 
 fn agent_str() -> &'static str {
     concat!("dimese-shard/", env!("CARGO_PKG_VERSION"))

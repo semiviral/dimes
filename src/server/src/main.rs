@@ -11,7 +11,7 @@ mod net;
 
 use anyhow::Result;
 use once_cell::sync::OnceCell;
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, process::Termination};
 use tokio::{
     net::TcpListener,
     sync::{Mutex, RwLock},
@@ -28,7 +28,7 @@ fn agent() -> String {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> impl Termination {
     #[cfg(debug_assertions)]
     dotenvy::dotenv().unwrap();
 
@@ -38,9 +38,7 @@ async fn main() {
 
     info!("Starting server...");
 
-    start().await.unwrap();
-
-    std::process::exit(0);
+    start().await
 }
 
 async fn start() -> Result<()> {

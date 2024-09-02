@@ -30,7 +30,6 @@ pub async fn get_chunk_buf() -> ManagedChunk {
 #[derive(Debug)]
 pub struct ChunkBufManager;
 
-#[async_trait::async_trait]
 impl Manager for ChunkBufManager {
     type Type = Chunk;
     type Error = anyhow::Error;

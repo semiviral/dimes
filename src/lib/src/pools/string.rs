@@ -105,7 +105,6 @@ pub async fn get_string_buf() -> ManagedString {
 #[derive(Debug)]
 pub struct StringManager;
 
-#[async_trait::async_trait]
 impl Manager for StringManager {
     type Type = String;
     type Error = anyhow::Error;

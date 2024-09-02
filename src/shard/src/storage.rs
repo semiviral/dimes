@@ -1,27 +1,21 @@
 use anyhow::Result;
-use sqlx::postgres::PgPoolOptions;
+use lib::CHUNK_SIZE;
+use redb::{Database, TableDefinition};
+use tokio::sync::OnceCell;
 use tracing::{Instrument, Level};
+use uuid::Uuid;
 
 use crate::cfg;
 
+type UuidKey = [u8; 16];
+
+const CHUNKS_TABLE_DEF: TableDefinition<UuidKey, [u8; CHUNK_SIZE]> = TableDefinition::new("chunks");
+
+static CHUNKS_DB: OnceCell<Database> = OnceCell::const_new();
+
 #[instrument]
 pub async fn connect() -> Result<()> {
-    static MIGRATOR: sqlx::migrate::Migrator = migrate!();
-
-    let connect_str = cfg::get().storage.url.as_str();
-    event!(Level::DEBUG, storage = connect_str);
-
-    let pool = PgPoolOptions::new()
-        .min_connections(cfg::get().storage.connections.min)
-        .max_connections(cfg::get().storage.connections.max)
-        .connect(connect_str)
-        .await
-        .expect("failed to connect to database");
-
-    MIGRATOR
-        .run(&pool)
-        .instrument(span!(Level::TRACE, "migrations"))
-        .await?;
+    
 
     debug!("Finished connecting to database.");
 

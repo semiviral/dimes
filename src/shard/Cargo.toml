@@ -19,17 +19,8 @@ deadpool = "*"
 tokio = { version = "*", features = ["full"] }
 serde = { version = "*", features = ["derive"] }
 axum = { version = "*", features = ["tracing", "http2", "multipart"] }
-sqlx = { version = "*", features = [
-    "runtime-tokio",
-    "tls-native-tls",
-    "postgres",
-    "macros",
-    "migrate",
-    "uuid",
-    "time",
-] }
 chrono = "*"
-directories = "*"
 
 once_cell = "*"
-uuid = { version = "*", features = ["v7", "fast-rng"] }
+uuid = { version = "*", features = ["v4", "v7", "fast-rng"] }
+redb = "*"

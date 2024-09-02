@@ -28,7 +28,6 @@ pub async fn get_message_buf() -> ManagedMessage {
 #[derive(Debug)]
 pub struct MessageBufManager;
 
-#[async_trait::async_trait]
 impl Manager for MessageBufManager {
     type Type = Vec<u8>;
     type Error = anyhow::Error;

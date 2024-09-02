@@ -14,14 +14,14 @@ impl DbStore {
     }
 
     pub async fn add_shard(&self, shard: &ShardInfo) -> Result<()> {
-        query!(
-            "INSERT INTO shards VALUES ($1, $2, $3, 0)",
-            shard.id(),
-            shard.agent(),
-            shard.chunks()
-        )
-        .execute(&self.pool)
-        .await?;
+        // query!(
+        //     "INSERT INTO shards VALUES ($1, $2, $3, 0)",
+        //     shard.id(),
+        //     shard.agent(),
+        //     shard.chunks()
+        // )
+        // .execute(&self.pool)
+        // .await?;
 
         Ok(())
     }
