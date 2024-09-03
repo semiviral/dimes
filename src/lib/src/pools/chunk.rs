@@ -1,4 +1,3 @@
-use crate::{Chunk, CHUNK_SIZE};
 use anyhow::Result;
 use deadpool::managed::{Manager, Metrics, RecycleResult};
 use deadpool::managed::{Object, Pool};

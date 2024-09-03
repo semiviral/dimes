@@ -14,7 +14,7 @@ struct Info {
 impl Default for Info {
     fn default() -> Self {
         Self {
-            chunks: cfg::get().storage.chunks,
+            chunks: cfg::get().storage().chunks(),
         }
     }
 }

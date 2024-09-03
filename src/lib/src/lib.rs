@@ -6,17 +6,11 @@ extern crate anyhow;
 #[macro_use]
 extern crate tracing;
 
+pub mod chunk;
 pub mod crypto;
-pub mod error;
-pub mod net;
+// pub mod error;
+// pub mod net;
 pub mod pools;
-
-pub const CHUNK_PARTS: usize = 0x100; // 256
-pub const CHUNK_PART_SIZE: usize = 0x1000; // 4096
-pub const CHUNK_SIZE: usize = CHUNK_PART_SIZE * CHUNK_PARTS; // 1MiB
-
-pub type Chunk = Box<[u8; CHUNK_SIZE]>;
-pub type ChunkPart = Box<[u8; CHUNK_PART_SIZE]>;
 
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

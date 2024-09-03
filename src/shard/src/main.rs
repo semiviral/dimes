@@ -1,11 +1,10 @@
-use directories::ProjectDirs;
-use once_cell::sync::Lazy;
-use postgrest::Postgrest;
 use std::{
-    io::{Read, Seek, Write},
-    path::PathBuf,
+    net::{IpAddr, Ipv4Addr, SocketAddr},
     str::FromStr,
 };
+
+use chacha20poly1305::aead::{rand_core::RngCore, OsRng};
+use lib::chunk::Chunk;
 use uuid::Uuid;
 
 #[macro_use]
@@ -15,48 +14,50 @@ mod api;
 mod cfg;
 mod storage;
 
-static PROJECT_PATH: Lazy<ProjectDirs> = Lazy::new(|| {
-    #[cfg(debug_assertions)]
-    {
-        ProjectDirs::from_path(PathBuf::from("./")).unwrap()
-    }
-
-    #[cfg(not(debug_assertions))]
-    {
-        ProjectDirs::from("net dimese", "", "dimese-shard").expect("`$HOME` directory required")
-    }
-});
-
-static ID: Lazy<Uuid> = Lazy::new(Uuid::new_v4);
-
 fn agent_str() -> &'static str {
     concat!("dimese-shard/", env!("CARGO_PKG_VERSION"))
 }
 
 #[tokio::main]
 async fn main() {
-    #[cfg(debug_assertions)]
+    use storage::info;
+    use tokio::net;
+
+    // Load the environment variables from `.env`.
     dotenvy::dotenv().unwrap();
 
+    // Initialize the async tracing formatter.
     tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::TRACE)
+        .with_max_level({
+            #[cfg(debug_assertions)]
+            {
+                tracing::Level::TRACE
+            }
+
+            #[cfg(not(debug_assertions))]
+            {
+                tracing::Level::INFO
+            }
+        })
         .init();
 
-    match run().await {
-        Ok(()) => info!("Shard has reached safe shutdown point."),
-        Err(err) => error!("Shard has encountered an unrecoverable error: {err:?}"),
-    }
-}
+    info!("Begin initializing...");
 
-async fn run() -> anyhow::Result<()> {
-    storage::connect()
+    trace!("Initializing storage...");
+    storage::init();
+
+    trace!("Initializing info...");
+    info::init().expect("failed to initialize info");
+    debug!("Shard ID: {}", info::get_id());
+    debug!("Started: {}", info::get_started_at());
+
+    let bind_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8000);
+    debug!("Binding API: {bind_addr}");
+    let listener = net::TcpListener::bind(bind_addr)
         .await
-        .expect("failed to connect to storage database");
+        .expect("failed to bind API");
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:8000")
-        .await
-        .expect("failed to bind HTTP listener");
-    api::accept_connections(listener).await?;
+    api::accept_connections(listener).await;
 
-    Ok(())
+    info!("Reached a safe shutdown point.");
 }

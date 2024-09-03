@@ -4,26 +4,34 @@ use std::net::SocketAddr;
 
 #[derive(Debug, Deserialize)]
 pub struct Cfg {
-    pub bind: Bind,
-    pub storage: Storage,
+    bind: SocketAddr,
+    storage: Storage,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct Bind {
-    pub http: SocketAddr,
+impl Cfg {
+    pub fn bind(&self) -> &SocketAddr {
+        &self.bind
+    }
+
+    pub fn storage(&self) -> &Storage {
+        &self.storage
+    }
 }
 
 #[derive(Debug, Deserialize)]
 pub struct Storage {
-    pub url: String,
-    pub chunks: u64,
-    pub connections: Connections,
+    path: String,
+    chunks: u64,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct Connections {
-    pub min: u32,
-    pub max: u32,
+impl Storage {
+    pub fn path(&self) -> &str {
+        self.path.as_str()
+    }
+
+    pub fn chunks(&self) -> u64 {
+        self.chunks
+    }
 }
 
 pub fn get() -> &'static Cfg {
@@ -32,7 +40,7 @@ pub fn get() -> &'static Cfg {
 
         Config::builder()
             .add_source(
-                Environment::with_prefix("DIMESE")
+                Environment::with_prefix("DIMESE_SHARD")
                     .separator("_")
                     .list_separator(","),
             )

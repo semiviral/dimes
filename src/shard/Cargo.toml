@@ -8,8 +8,8 @@ edition = "2021"
 lib = { path = "../lib" }
 
 dotenvy = "*"
+thiserror = "*"
 
-anyhow = "*"
 tracing = "*"
 tracing-subscriber = { version = "*", features = ["parking_lot"] }
 config = "*"
@@ -19,7 +19,7 @@ deadpool = "*"
 tokio = { version = "*", features = ["full"] }
 serde = { version = "*", features = ["derive"] }
 axum = { version = "*", features = ["tracing", "http2", "multipart"] }
-chrono = "*"
+chrono = { version = "*", features = ["serde"] }
 
 once_cell = "*"
 uuid = { version = "*", features = ["v4", "v7", "fast-rng"] }
