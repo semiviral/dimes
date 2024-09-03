@@ -1,27 +1,42 @@
-use axum::{middleware::map_response, response::Response, Router};
+use axum::{
+    http::{header, HeaderValue},
+    middleware::map_response,
+    response::Response,
+    Router,
+};
 use tokio::net::TcpListener;
+use tower_http::{
+    compression::CompressionLayer, decompression::DecompressionLayer,
+    set_header::SetResponseHeaderLayer,
+};
 
 mod chunk;
 mod info;
 
 pub async fn accept_connections(listener: TcpListener) {
-    async fn add_default_headers<B>(mut response: Response<B>) -> Response<B> {
-        use axum::http::header;
-
-        let headers = response.headers_mut();
-        headers.insert(header::SERVER, crate::agent_str().parse().unwrap());
-        headers.insert(
-            header::DATE,
-            chrono::Utc::now().to_rfc3339().parse().unwrap(),
-        );
-
-        response
-    }
-
     trace!("Building API router...");
+
+    let decompression_layer = DecompressionLayer::new()
+        .zstd(true)
+        .br(true)
+        .gzip(true)
+        .no_deflate();
+    let compression_layer = CompressionLayer::new()
+        .zstd(true)
+        .br(true)
+        .gzip(true)
+        .no_deflate();
+    let set_server_layer = SetResponseHeaderLayer::if_not_present(
+        header::SERVER,
+        HeaderValue::from_static(crate::agent_str()),
+    );
+
     let app = Router::new()
+        .layer(decompression_layer)
         .nest("/api", info::routes())
-        .layer(map_response(add_default_headers));
+        .nest("/api", chunk::routes())
+        .layer(set_server_layer)
+        .layer(compression_layer);
 
     info!("Begin listening for requests.");
     axum::serve(listener, app)

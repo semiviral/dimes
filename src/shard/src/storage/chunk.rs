@@ -4,7 +4,6 @@ use redb::TableDefinition;
 use uuid::Uuid;
 
 const CHUNK_PART_SIZE: usize = 100_000;
-const PARTS_PER_CHUNK: usize = Chunk::SIZE / CHUNK_PART_SIZE;
 
 static CHUNK_TABLE: TableDefinition<([u8; size_of::<Uuid>()], u32), &[u8; CHUNK_PART_SIZE]> =
     TableDefinition::new("chunks");

@@ -3,6 +3,7 @@ use uuid::Uuid;
 const CHUNK_SIZE: usize = 4_000_000; // 4MB
 type ChunkMemory = [u8; CHUNK_SIZE];
 
+#[derive(Debug)]
 pub struct Chunk {
     id: Uuid,
     memory: Box<ChunkMemory>,
@@ -32,6 +33,10 @@ impl Chunk {
 
     pub fn id(&self) -> &Uuid {
         &self.id
+    }
+
+    pub fn into_box(self) -> Box<ChunkMemory> {
+        self.memory
     }
 }
 

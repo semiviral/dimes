@@ -1,12 +1,3 @@
-use std::{
-    net::{IpAddr, Ipv4Addr, SocketAddr},
-    str::FromStr,
-};
-
-use chacha20poly1305::aead::{rand_core::RngCore, OsRng};
-use lib::chunk::Chunk;
-use uuid::Uuid;
-
 #[macro_use]
 extern crate tracing;
 
@@ -51,7 +42,7 @@ async fn main() {
     debug!("Shard ID: {}", info::get_id());
     debug!("Started: {}", info::get_started_at());
 
-    let bind_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8000);
+    let bind_addr = cfg::get().bind();
     debug!("Binding API: {bind_addr}");
     let listener = net::TcpListener::bind(bind_addr)
         .await
