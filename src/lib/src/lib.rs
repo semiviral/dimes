@@ -1,4 +1,3 @@
-use pools::ManagedString;
 use uuid::Uuid;
 
 #[macro_use]
@@ -23,16 +22,16 @@ impl Hash {
     }
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug)]
 pub struct ShardInfo {
     id: Uuid,
-    agent: ManagedString,
+    agent: String,
     chunks: i64,
 }
 
 impl ShardInfo {
     #[inline]
-    pub fn new(id: Uuid, agent: ManagedString, chunks: u32) -> Self {
+    pub fn new(id: Uuid, agent: String, chunks: u32) -> Self {
         Self {
             id,
             agent,

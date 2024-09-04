@@ -1,7 +1,5 @@
 use axum::{
     http::{header, HeaderValue},
-    middleware::map_response,
-    response::Response,
     Router,
 };
 use tokio::net::TcpListener;
@@ -12,6 +10,12 @@ use tower_http::{
 
 mod chunk;
 mod info;
+
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error(transparent)]
+    Storage(#[from] crate::storage::Error),
+}
 
 pub async fn accept_connections(listener: TcpListener) {
     trace!("Building API router...");

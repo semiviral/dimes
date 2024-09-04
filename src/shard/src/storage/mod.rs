@@ -17,12 +17,6 @@ pub enum Error {
 
     #[error(transparent)]
     Storage(#[from] redb::StorageError),
-
-    #[error("specified key does not exist in database")]
-    KeyNotExists,
-
-    #[error("the specified chunk is missing parts")]
-    ChunkIncomplete,
 }
 
 type Result<T> = std::result::Result<T, Error>;
@@ -37,6 +31,21 @@ pub fn init() {
 
     let storage = crate::cfg::get().storage();
     let db = Database::create(storage.path()).expect("failed to open or create database");
+
+    debug!("Verifying database...");
+    let write_txn = db
+        .begin_write()
+        .expect("failed to open write to init tables");
+    write_txn
+        .open_table(info::TABLE_DEF)
+        .expect("failed to initialize info table");
+    write_txn
+        .open_table(chunk::TABLE_DEF)
+        .expect("failed to initialize chunk table");
+    write_txn
+        .commit()
+        .expect("failed to commit table initialization");
+
     DATABASE
         .set(db)
         .expect("failed to set global databse reference");

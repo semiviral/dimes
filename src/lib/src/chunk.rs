@@ -1,6 +1,6 @@
 use uuid::Uuid;
 
-const CHUNK_SIZE: usize = 4_000_000; // 4MB
+const CHUNK_SIZE: usize = 64_000;
 type ChunkMemory = [u8; CHUNK_SIZE];
 
 #[derive(Debug)]
@@ -35,7 +35,7 @@ impl Chunk {
         &self.id
     }
 
-    pub fn into_box(self) -> Box<ChunkMemory> {
+    pub fn into_box(self) -> Box<[u8]> {
         self.memory
     }
 }

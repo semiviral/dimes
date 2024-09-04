@@ -1,9 +1,9 @@
-use super::{Result, with_table, with_table_mut};
+use super::{with_table, with_table_mut, Result};
 use chrono::{DateTime, Utc};
 use redb::{AccessGuard, ReadOnlyTable, ReadableTable, Table, TableDefinition};
 use uuid::Uuid;
 
-static INFO_TABLE: TableDefinition<&str, &str> = TableDefinition::new("info");
+pub(super) static TABLE_DEF: TableDefinition<&str, &str> = TableDefinition::new("info");
 
 struct InfoKey;
 
@@ -27,7 +27,7 @@ pub fn init() -> Result<()> {
         Ok(())
     }
 
-    with_table_mut(INFO_TABLE, init_info_inner)??;
+    with_table_mut(TABLE_DEF, init_info_inner)??;
 
     Ok(())
 }
@@ -40,7 +40,7 @@ fn get_info<'a, 'b>(info_tbl: &ReadOnlyTable<&str, &str>, key: &str) -> AccessGu
 }
 
 pub fn get_id() -> Uuid {
-    with_table(INFO_TABLE, |info_tbl| {
+    with_table(TABLE_DEF, |info_tbl| {
         let shard_id_str = get_info(&info_tbl, InfoKey::SHARD_ID);
         let shard_id = Uuid::parse_str(shard_id_str.value()).expect("shard id is malformed");
 
@@ -50,7 +50,7 @@ pub fn get_id() -> Uuid {
 }
 
 pub fn get_started_at() -> DateTime<Utc> {
-    with_table(INFO_TABLE, |info_tbl| {
+    with_table(TABLE_DEF, |info_tbl| {
         let started_at_str = get_info(&info_tbl, InfoKey::STARTED_AT);
         let started_at = DateTime::parse_from_rfc3339(started_at_str.value())
             .expect("malformed input")
