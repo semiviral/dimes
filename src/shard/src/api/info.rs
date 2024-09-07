@@ -11,8 +11,8 @@ struct Info {
     pub chunks: u64,
 }
 
-impl Default for Info {
-    fn default() -> Self {
+impl Info {
+    fn current_cfg() -> Self {
         Self {
             chunks: cfg::get().storage().chunks(),
         }
@@ -20,5 +20,5 @@ impl Default for Info {
 }
 
 async fn info() -> impl IntoResponse {
-    (StatusCode::OK, Json(Info::default()))
+    (StatusCode::OK, Json(Info::current_cfg()))
 }

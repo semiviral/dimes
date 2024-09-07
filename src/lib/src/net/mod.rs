@@ -1,6 +1,9 @@
 use crate::{error::unexpected_message, pools::get_message_buf};
 use anyhow::Result;
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
+use deadpool::unmanaged::Pool;
+use once_cell::sync::Lazy;
+use serde::Serialize;
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tracing::Level;
@@ -8,6 +11,9 @@ use uuid::Uuid;
 
 mod message;
 pub use message::*;
+
+static SERIALIZE_POOL: Lazy<Pool<Message>> = Lazy::new(|| Pool::new(512));
+static DESERIALIZE_POOL: Lazy<Pool<Vec<u8>>> = Lazy::new(|| Pool::new(512));
 
 pub const MESSAGE_TIMEOUT: Duration = Duration::from_secs(3);
 pub const MAX_TIMEOUT: Duration = Duration::MAX;
@@ -24,9 +30,7 @@ pub async fn send_message<W: AsyncWrite + Unpin>(
         let mut message_buf = get_message_buf().await;
         let mut encryption_buf = get_message_buf().await;
 
-        message
-            .serialize(&mut message_buf)
-            .expect("failed to serialize message");
+        let buf = bincode::serialize_into(&message).expect("failed to serialize message");
 
         let nonce = crate::crypto::encrypt(cipher, &message_buf, &mut *encryption_buf)?;
 
@@ -76,12 +80,12 @@ pub async fn negotiate_hello<S: AsyncRead + AsyncWrite + Unpin, C: AsRef<XChaCha
     mut stream: S,
     cipher: C,
 ) -> Result<()> {
-    let stamp = Uuid::new_v4().into_bytes();
+    let hello_stamp = Uuid::new_v4();
 
     send_message(
         &mut stream,
         cipher.as_ref(),
-        Message::Hello(stamp),
+        Message::Hello { stamp: hello_stamp },
         MESSAGE_TIMEOUT,
         true,
     )

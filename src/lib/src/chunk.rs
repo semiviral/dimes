@@ -1,23 +1,23 @@
 use uuid::Uuid;
 
 const CHUNK_SIZE: usize = 64_000;
-type ChunkMemory = [u8; CHUNK_SIZE];
+pub type Chunk = [u8; CHUNK_SIZE];
 
 #[derive(Debug)]
-pub struct Chunk {
+pub struct ChunkOwned {
     id: Uuid,
-    memory: Box<ChunkMemory>,
+    memory: Box<Chunk>,
 }
 
-impl Chunk {
+impl ChunkOwned {
     pub const SIZE: usize = CHUNK_SIZE;
 
     pub fn new_zeroed(id: Uuid) -> Self {
         use std::alloc::Layout;
 
-        const MEMORY_LAYOUT: Layout = Layout::new::<ChunkMemory>();
+        const MEMORY_LAYOUT: Layout = Layout::new::<Chunk>();
 
-        // SAFETY: Allocate a zero-initialized `ChunkMemory`-sized region of memory, and read it into box holding a `ChunkMemory`.
+        // SAFETY: Allocate a zero-initialized `Chunk`-sized region of memory, and read it into box holding a `Chunk`.
         unsafe {
             let memory = std::alloc::alloc_zeroed(MEMORY_LAYOUT);
             let slice_ptr = std::ptr::slice_from_raw_parts_mut(memory, MEMORY_LAYOUT.size());
@@ -40,15 +40,15 @@ impl Chunk {
     }
 }
 
-impl core::ops::Deref for Chunk {
-    type Target = ChunkMemory;
+impl std::ops::Deref for ChunkOwned {
+    type Target = Chunk;
 
     fn deref(&self) -> &Self::Target {
         &self.memory
     }
 }
 
-impl core::ops::DerefMut for Chunk {
+impl std::ops::DerefMut for ChunkOwned {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.memory
     }

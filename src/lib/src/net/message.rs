@@ -1,132 +1,95 @@
-use crate::{
-    pools::{get_string_buf, ManagedString},
-    Chunk, ChunkPart, Hash,
-};
-use anyhow::Result;
-use std::mem::{size_of, Discriminant};
+use std::mem::Discriminant;
+
+use crate::chunk::Chunk;
+use deadpool::unmanaged::{Object, Pool};
+use once_cell::sync::Lazy;
+use tokio::io::ReadBuf;
 use uuid::Uuid;
+
+#[derive(thiserror::Error, Debug)]
+pub enum Error {}
+
+pub type Result<T> = std::result::Result<T, Error>;
 
 #[repr(u32)]
 #[derive(Debug)]
 pub enum Message {
-    Hello([u8; 16]) = Self::HELLO,
-    Echo([u8; 16]) = Self::ECHO,
+    Ok = 0x0,
 
-    Ok = Self::OK,
+    Hello {
+        stamp: Uuid,
+    } = 0x1,
 
-    Ping = Self::PING,
-    Pong = Self::PONG,
+    Echo {
+        stamp: Uuid,
+    } = 0x2,
+
+    Ping {
+        stamp: Uuid,
+    } = 0x4,
+
+    Pong {
+        stamp: Uuid,
+    } = 0x5,
 
     ShardInfo {
         id: Uuid,
-        agent: ManagedString,
+        agent: String,
         chunks: u32,
-    } = Self::SHARD_INFO,
-
-    ShardShutdown = Self::SHARD_SHUTDOWN,
+    } = 0x80000,
 
     Store {
-        hash: Hash,
-        chunk: Chunk,
-    } = Self::STORE,
+        id: Uuid,
+        data: Box<Chunk>,
+    } = 0x80100,
 
-    StoreExists {
-        hash: Hash,
-    } = Self::STORE_EXISTS,
+    Retrieve {
+        id: Uuid,
+    } = 0x80101,
 
-    Stock {
-        hash: Hash,
-        chunk: Chunk,
-    } = Self::STOCK,
-
-    RequestStock {
-        hash: Hash,
-    } = Self::REQUEST_STOCK,
+    ChunkExists {
+        id: Uuid,
+    } = 0x80102,
 }
 
-#[allow(clippy::inconsistent_digit_grouping)]
 impl Message {
-    const OK: u32 = 0;
-    const HELLO: u32 = 1_0_000;
-    const ECHO: u32 = 1_0_001;
-    const PING: u32 = 1_0_002;
-    const PONG: u32 = 1_0_003;
-    const SHARD_INFO: u32 = 2_0_000;
-    const SHARD_SHUTDOWN: u32 = 2_1_000;
-    const STORE: u32 = 3_0_000;
-    const STOCK: u32 = 3_0_001;
-    const STORE_EXISTS: u32 = 3_1_000;
-    const REQUEST_STOCK: u32 = 3_0_010;
-
-    pub async fn deserialize(bytes: &[u8]) -> Result<Self> {
-        let (discriminant, raw) = bytes.split_at(std::mem::size_of::<Discriminant<Message>>());
-        let discriminant = u32::from_le_bytes(discriminant.try_into().unwrap());
-
-        match discriminant {
-            Self::OK => Ok(Self::Ok),
-
-            Self::HELLO => Ok(Self::Hello(raw.try_into().expect("wrong data length"))),
-            Self::ECHO => Ok(Self::Echo(raw.try_into().expect("wrong data length"))),
-
-            Self::PING => Ok(Self::Ping),
-            Self::PONG => Ok(Self::Pong),
-
-            Self::SHARD_INFO => {
-                let (id_bytes, raw) = raw.split_at(size_of::<Uuid>());
-                let id = Uuid::from_bytes_le(id_bytes.try_into().unwrap());
-
-                let (agent_str_len_bytes, raw) = raw.split_at(size_of::<u32>());
-                let agent_str_len = u64::from_le_bytes(agent_str_len_bytes.try_into().unwrap());
-
-                let (agent_str_bytes, chunks_bytes) = raw.split_at(agent_str_len as usize);
-                let agent_str =
-                    std::str::from_utf8(agent_str_bytes).expect("received invalid agent string");
-                let mut agent = get_string_buf().await;
-                agent.push_str(agent_str);
-
-                let chunks = u32::from_le_bytes(chunks_bytes.try_into().unwrap());
-
-                Ok(Self::ShardInfo { id, agent, chunks })
-            }
-
-            discriminant => bail!("Unknown discriminant: {discriminant}"),
-        }
-    }
-
-    pub fn serialize(self, buf: &mut Vec<u8>) -> Result<()> {
-        debug_assert!(buf.is_empty());
-
-        // SAFETY: The discriminant value is the first value in the struct's memory representation.
-        let discriminant = unsafe { (&self as *const Self as *const u32).read() };
-        buf.extend_from_slice(&discriminant.to_le_bytes());
+    pub async fn serialize_into(self, buf: &mut Vec<u8>) -> Result<()> {
+        // Safety: https://doc.rust-lang.org/reference/items/enumerations.html#pointer-casting
+        let discriminant = unsafe { (&self as *const _ as *const u32).read() };
+        buf.extend(discriminant.to_le_bytes());
 
         match self {
-            Self::Ok | Self::Ping | Self::Pong | Self::ShardShutdown => {
-                // do nothing
+            Message::Ok => {}
+
+            Message::Hello { stamp }
+            | Message::Echo { stamp }
+            | Message::Ping { stamp }
+            | Message::Pong { stamp } => {
+                buf.extend(stamp.to_bytes_le());
             }
 
-            Self::Hello(stamp) | Self::Echo(stamp) => {
-                buf.extend_from_slice(&stamp);
+            Message::ShardInfo { id, agent, chunks } => {
+                buf.extend(id.to_bytes_le());
+                buf.extend(agent.len().to_le_bytes());
+                buf.extend(agent.as_bytes());
+                buf.extend(chunks.to_le_bytes());
             }
 
-            Self::ShardInfo { id, agent, chunks } => {
-                buf.extend_from_slice(&id.to_bytes_le());
-                buf.extend_from_slice(&(agent.len() as u64).to_le_bytes());
-                buf.extend_from_slice(agent.as_bytes());
-                buf.extend_from_slice(&chunks.to_le_bytes());
+            Message::Store { id, data } => {
+                buf.extend(id.to_bytes_le());
+                buf.extend(data.as_slice());
             }
 
-            Self::Store { hash, chunk } | Self::Stock { hash, chunk } => {
-                buf.extend_from_slice(&hash.into_bytes());
-                buf.extend_from_slice(&(chunk.len() as u64).to_le_bytes());
-                buf.extend_from_slice(chunk.as_slice());
-            }
-
-            Self::StoreExists { hash } | Self::RequestStock { hash } => {
-                buf.extend_from_slice(&hash.into_bytes());
+            Message::Retrieve { id } | Message::ChunkExists { id } => {
+                buf.extend(id.to_bytes_le());
             }
         }
 
         Ok(())
+    }
+
+    pub fn deserialize_from(buf: &[u8]) -> Result<Self> {
+        let discriminant = u32::from_le_bytes(buf[..size_of::<u32>()].try_into().unwrap());
+        match discriminant {}
     }
 }

@@ -5,9 +5,9 @@ edition = "2021"
 
 
 [dependencies]
-anyhow = "*"
 tracing = "*"
 tracing-subscriber = { version = "*", features = ["parking_lot"] }
+thiserror = "*"
 
 chacha20poly1305 = "*"
 x25519-dalek = "*"
@@ -21,7 +21,4 @@ uuid = { version = "*", features = ["v4", "v7", "fast-rng", "serde"] }
 once_cell = "*"
 async-trait = "*"
 deadpool = "*"
-axum-core = "*"
-http-body = "*"
-http-body-util = "*"
-bytes = "*"
+bincode = "*"
