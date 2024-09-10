@@ -1,18 +1,18 @@
 use once_cell::sync::Lazy;
 use serde::Deserialize;
-use std::net::SocketAddr;
-use tokio_rustls::rustls::pki_types::ServerName;
+use std::time::Duration;
 
 #[derive(Debug, Deserialize)]
 pub struct Cfg {
     tls: bool,
     remote: String,
     storage: Storage,
+    message_timeout: u64,
 }
 
 impl Cfg {
-    pub fn remote(&self) -> &String {
-        &self.remote
+    pub fn remote(&self) -> &str {
+        self.remote.as_str()
     }
 
     pub fn use_tls(&self) -> bool {
@@ -21,6 +21,10 @@ impl Cfg {
 
     pub fn storage(&self) -> &Storage {
         &self.storage
+    }
+
+    pub fn message_timeout(&self) -> Duration {
+        Duration::from_millis(self.message_timeout)
     }
 }
 

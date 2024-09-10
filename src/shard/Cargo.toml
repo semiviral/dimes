@@ -8,7 +8,7 @@ edition = "2021"
 lib = { path = "../lib" }
 
 dotenvy = "*"
-thiserror = "*"
+anyhow = "*"
 
 tracing = "*"
 tracing-subscriber = "*"
@@ -16,6 +16,8 @@ config = "*"
 deadpool = "*"
 
 tokio = { version = "*", features = ["full"] }
+serde = "*"
+bincode = "*"
 chrono = "*"
 tokio-rustls = { version = "*", default-features = false, features = ["ring"] }
 webpki-roots = "*"

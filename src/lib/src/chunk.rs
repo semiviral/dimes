@@ -1,12 +1,13 @@
 use crate::array_pool::{ArrayPool, ManagedArray};
 use once_cell::sync::Lazy;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 const CHUNK_SIZE: usize = 64_000;
 
 static ARRAY_POOL: Lazy<ArrayPool<CHUNK_SIZE>> = Lazy::new(|| ArrayPool::new(512));
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Chunk {
     id: Uuid,
     memory: ManagedArray<CHUNK_SIZE>,

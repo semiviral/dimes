@@ -9,6 +9,7 @@ pub mod chunk;
 pub mod array_pool;
 pub mod net;
 // pub mod buf;
+pub mod bstr;
 
 pub const AGENT_STRING_MAX_LEN: usize = 32;
 
