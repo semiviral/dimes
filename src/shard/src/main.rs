@@ -1,7 +1,17 @@
+use std::{net::ToSocketAddrs, sync::Arc};
+
+use tokio::{
+    io::{AsyncRead, AsyncWrite},
+    net::TcpStream,
+};
+use tokio_rustls::{
+    rustls::{self, pki_types::ServerName, ClientConfig, RootCertStore},
+    TlsConnector,
+};
+
 #[macro_use]
 extern crate tracing;
 
-mod api;
 mod cfg;
 mod storage;
 
@@ -42,13 +52,37 @@ async fn main() {
     debug!("Shard ID: {}", info::get_id());
     debug!("Started: {}", info::get_started_at());
 
-    let bind_addr = cfg::get().bind();
-    debug!("Binding API: {bind_addr}");
-    let listener = net::TcpListener::bind(bind_addr)
-        .await
-        .expect("failed to bind API");
-
-    api::accept_connections(listener).await;
+    connect().unwrap();
 
     info!("Reached a safe shutdown point.");
 }
+
+async fn connect() -> Result<()> {
+    let addrs = cfg::get()
+        .remote()
+        .to_socket_addrs()
+        .expect("remote address cannot be resolved");
+    let stream = TcpStream::connect(&addrs).await?;
+
+    if cfg::get().use_tls() {
+        let root_cert_store = RootCertStore::empty();
+        root_cert_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+
+        let config = ClientConfig::builder()
+            .with_root_certificates(root_cert_store)
+            .with_no_client_auth();
+        let tls_connector = TlsConnector::from(Arc::new(config));
+        let dns_name = ServerName::try_from(cfg::get().remote()).expect("not a valid remote host");
+
+        let stream = tls_connector
+            .connect(dns_name, stream)
+            .await
+            .expect("TLS connect did not succeed");
+
+        listen(stream)
+    } else {
+        listen(stream)
+    }
+}
+
+async fn listen<S: AsyncRead + AsyncWrite + Unpin>(stream: S) -> Result<S> {}

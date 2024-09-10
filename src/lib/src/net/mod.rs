@@ -1,137 +1,122 @@
-use crate::{error::unexpected_message, pools::get_message_buf};
-use anyhow::Result;
-use chacha20poly1305::{XChaCha20Poly1305, XNonce};
-use deadpool::unmanaged::Pool;
-use once_cell::sync::Lazy;
-use serde::Serialize;
 use std::time::Duration;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tracing::Level;
-use uuid::Uuid;
-
 mod message;
 pub use message::*;
 
-static SERIALIZE_POOL: Lazy<Pool<Message>> = Lazy::new(|| Pool::new(512));
-static DESERIALIZE_POOL: Lazy<Pool<Vec<u8>>> = Lazy::new(|| Pool::new(512));
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("message error")]
+    Message(#[from] message::Error),
+
+    #[error("error using pooled buffers")]
+    Pool(#[from] deadpool::unmanaged::PoolError),
+
+    #[error("async IO error")]
+    Io(#[from] tokio::io::Error),
+
+    #[error("function timed out")]
+    Timeout(#[from] tokio::time::error::Elapsed),
+
+    // #[error("cryptographic error")]
+    // Crypto(#[from] crate::crypto::Error),
+
+    #[error("expected pong, received: {0:?}")]
+    ExpectedPong(Message),
+}
+
+pub type Result<T> = std::result::Result<T, Error>;
 
 pub const MESSAGE_TIMEOUT: Duration = Duration::from_secs(3);
 pub const MAX_TIMEOUT: Duration = Duration::MAX;
 
-#[instrument(level = "trace", skip(writer, cipher))]
-pub async fn send_message<W: AsyncWrite + Unpin>(
-    mut writer: W,
-    cipher: &XChaCha20Poly1305,
-    message: Message,
-    timeout: Duration,
-    flush: bool,
-) -> Result<()> {
-    tokio::time::timeout(timeout, async {
-        let mut message_buf = get_message_buf().await;
-        let mut encryption_buf = get_message_buf().await;
-
-        let buf = bincode::serialize_into(&message).expect("failed to serialize message");
-
-        let nonce = crate::crypto::encrypt(cipher, &message_buf, &mut *encryption_buf)?;
-
-        event!(Level::TRACE, ?nonce);
-
-        writer.write_u32_le(encryption_buf.len() as u32).await?;
-        writer.write_all(nonce.as_slice()).await?;
-        writer.write_all(&encryption_buf).await?;
-
-        if flush {
-            writer.flush().await?;
-        }
-
-        Result::<()>::Ok(())
-    })
-    .await??;
-
-    Ok(())
+pub struct Connection<S: AsyncRead + AsyncWrite + Unpin> {
+    stream: S,
 }
 
-#[instrument(level = "trace", skip(reader, cipher))]
-pub async fn receive_message<R: AsyncRead + Unpin, C: AsRef<XChaCha20Poly1305>>(
-    mut reader: R,
-    cipher: C,
-    timeout: Duration,
-) -> Result<Message> {
-    tokio::time::timeout(timeout, async {
-        let mut message_buf = get_message_buf().await;
-        let mut decryption_buf = get_message_buf().await;
-
-        let data_len = reader.read_u32_le().await? as usize;
-        let mut nonce = XNonce::default();
-        reader.read_exact(&mut nonce).await?;
-        reader.read_exact(&mut decryption_buf).await?;
-
-        crate::crypto::decrypt(cipher.as_ref(), &nonce, &decryption_buf, &mut *message_buf)?;
-
-        let message = Message::deserialize(&message_buf).await?;
-        event!(Level::TRACE, ?message, ?data_len, ?nonce);
-
-        Ok(message)
-    })
-    .await?
-}
-
-pub async fn negotiate_hello<S: AsyncRead + AsyncWrite + Unpin, C: AsRef<XChaCha20Poly1305>>(
-    mut stream: S,
-    cipher: C,
-) -> Result<()> {
-    let hello_stamp = Uuid::new_v4();
-
-    send_message(
-        &mut stream,
-        cipher.as_ref(),
-        Message::Hello { stamp: hello_stamp },
-        MESSAGE_TIMEOUT,
-        true,
-    )
-    .await?;
-
-    match receive_message(&mut stream, &cipher, MESSAGE_TIMEOUT).await? {
-        Message::Hello(stamp) => {
-            send_message(
-                &mut stream,
-                cipher.as_ref(),
-                Message::Echo(stamp),
-                MESSAGE_TIMEOUT,
-                true,
-            )
-            .await
+impl<S: AsyncRead + AsyncWrite + Unpin> Connection<S> {
+    pub fn new(cipher: XChaCha20Poly1305, stream: S) -> Self {
+        Self {
+            send_bufs: (Buf::new(), Buf::new()),
+            recv_bufs: (Buf::new(), Buf::new()),
+            cipher,
+            stream,
         }
-
-        message => unexpected_message("Message::Hello", message),
-    }?;
-
-    match receive_message(&mut stream, &cipher, MESSAGE_TIMEOUT).await? {
-        Message::Echo(restamp) if restamp == stamp => Ok(()),
-
-        Message::Echo(restamp) => {
-            bail!("Peer reponded with the incorrect stamp: expected {stamp:?}, got {restamp:?}")
-        }
-
-        message => unexpected_message("Message::Echo", message),
     }
-}
 
-pub async fn ping_pong<S: AsyncRead + AsyncWrite + Unpin, C: AsRef<XChaCha20Poly1305>>(
-    mut stream: S,
-    cipher: C,
-) -> Result<()> {
-    send_message(
-        &mut stream,
-        cipher.as_ref(),
-        Message::Ping,
-        MESSAGE_TIMEOUT,
-        true,
-    )
-    .await?;
+    #[instrument(level = "trace", skip(self))]
+    pub async fn send_message(
+        &mut self,
+        message: Message,
+        timeout: Duration,
+        flush: bool,
+    ) -> Result<()> {
+        let (serialize_buf, encrypt_buf) = &mut self.send_bufs;
 
-    match receive_message(&mut stream, &cipher, MESSAGE_TIMEOUT).await? {
-        Message::Pong => Ok(()),
-        message => unexpected_message("Message::Pong", message),
+        tokio::time::timeout(timeout, async {
+            // Serialize message
+            message.serialize_into(serialize_buf)?;
+
+            // Encrypt message
+            let nonce = XChaCha20Poly1305::generate_nonce(&mut OsRng);
+            encrypt(&self.cipher, &nonce, serialize_buf.as_ref(), encrypt_buf)?;
+
+            event!(Level::TRACE, ?nonce);
+
+            // Transmit message
+            let len = u32::try_from(encrypt_buf.len()).unwrap();
+            self.stream.write_u32_le(len).await?;
+            self.stream.write_all(&nonce).await?;
+            self.stream.write_all(encrypt_buf.as_ref()).await?;
+
+            if flush {
+                self.stream.flush().await?;
+            }
+
+            Result::<()>::Ok(())
+        })
+        .await??;
+
+        serialize_buf.clear();
+        encrypt_buf.clear();
+
+        Ok(())
+    }
+
+    #[instrument(level = "trace", skip(self))]
+    pub async fn receive_message(&mut self, timeout: Duration) -> Result<Message> {
+        let (deserialize_buf, decrypt_buf) = &mut self.recv_bufs;
+
+        tokio::time::timeout(timeout, async {
+            let len = usize::try_from(self.stream.read_u32_le().await?).unwrap();
+
+            let mut nonce = XNonce::default();
+            self.stream.read_exact(&mut nonce).await?;
+            self.stream.read_exact(&mut decrypt_buf).await?;
+
+            crate::crypto::decrypt(&self.cipher, &nonce, decrypt_buf, deserialize_buf)?;
+
+            let message = Message::deserialize_from(&**deserialize_buf).await?;
+            event!(Level::TRACE, ?message, ?len, ?nonce);
+
+            self.msg_buf.clear();
+            self.crypt_buf.clear();
+
+            Ok(message)
+        })
+        .await?;
+
+        deserialize_buf.clear();
+        decrypt_buf.clear();
+
+        Ok(())
+    }
+
+    pub async fn ping_pong(&mut self) -> Result<()> {
+        self.send_message(Message::Ping, MESSAGE_TIMEOUT, true)
+            .await?;
+
+        match self.receive_message(MESSAGE_TIMEOUT).await? {
+            Message::Pong => Ok(()),
+            message => Err(Error::ExpectedPong(message)),
+        }
     }
 }

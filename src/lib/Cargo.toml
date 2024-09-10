@@ -8,17 +8,15 @@ edition = "2021"
 tracing = "*"
 tracing-subscriber = { version = "*", features = ["parking_lot"] }
 thiserror = "*"
-
-chacha20poly1305 = "*"
-x25519-dalek = "*"
-blake2 = "*"
-rand = "*"
+tokio-rustls = { version = "*", default-features = false, features = [
+    "logging",
+    "ring",
+] }
 
 tokio = { version = "*", features = ["full"] }
 serde = { version = "*", features = ["derive"] }
 serde_arrays = "*"
 uuid = { version = "*", features = ["v4", "v7", "fast-rng", "serde"] }
 once_cell = "*"
-async-trait = "*"
 deadpool = "*"
-bincode = "*"
+paste = "*"

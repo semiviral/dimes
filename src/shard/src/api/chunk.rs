@@ -17,11 +17,11 @@ pub fn routes() -> Router {
 }
 
 async fn get_chunk(id: Path<Uuid>) -> impl IntoResponse {
-    match crate::storage::chunk::get_chunk(*id) {
+    match crate::storage::chunk::get_chunk(*id).await {
         Ok(Some(chunk)) => {
             trace!("Serving chunk: {} / {:X?}", chunk.id(), &chunk[..16]);
 
-            (StatusCode::OK, chunk.into_box()).into_response()
+            (StatusCode::OK, chunk).into_response()
         }
 
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
@@ -56,7 +56,7 @@ async fn put_chunk(id: Path<Uuid>, body: Bytes) -> impl IntoResponse {
 
     trace!("Inserting chunk: {} / {:X?}", *id, &body[..12]);
 
-    let mut chunk = Chunk::new_zeroed(*id);
+    let mut chunk = Chunk::new_zeroed(*id).await;
     chunk.copy_from_slice(&body);
 
     match crate::storage::chunk::put_chunk(chunk) {

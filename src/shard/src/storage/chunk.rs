@@ -14,20 +14,21 @@ pub fn chunk_exists(id: Uuid) -> Result<bool> {
         .is_some())
 }
 
-pub fn get_chunk(id: Uuid) -> Result<Option<Chunk>> {
+pub async fn get_chunk(id: Uuid) -> Result<Option<Chunk>> {
     let id_bytes = id.to_bytes_le();
 
     let read_txn = get_db().begin_read()?;
     let chunk_tbl = read_txn.open_table(TABLE_DEF)?;
 
-    let chunk = chunk_tbl.get(id_bytes)?.map(|stored_chunk| {
-        // TODO: use pooling for the chunk data
-        let mut chunk = Chunk::new_zeroed(id);
-        chunk.copy_from_slice(stored_chunk.value());
-        chunk
-    });
+    match chunk_tbl.get(id_bytes)? {
+        Some(data) => {
+            let mut chunk = Chunk::new_zeroed(id).await;
+            chunk.copy_from_slice(data.value());
 
-    Ok(chunk)
+            Ok(Some(chunk))
+        }
+        None => Ok(None),
+    }
 }
 
 pub fn put_chunk(chunk: Chunk) -> Result<()> {
@@ -35,7 +36,7 @@ pub fn put_chunk(chunk: Chunk) -> Result<()> {
 
     write_txn
         .open_table(TABLE_DEF)?
-        .insert(chunk.id().to_bytes_le(), &*chunk)?;
+        .insert(chunk.id().to_bytes_le(), &**chunk)?;
 
     write_txn.commit()?;
 

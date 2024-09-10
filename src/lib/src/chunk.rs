@@ -1,54 +1,44 @@
+use crate::array_pool::{ArrayPool, ManagedArray};
+use once_cell::sync::Lazy;
 use uuid::Uuid;
 
 const CHUNK_SIZE: usize = 64_000;
-pub type Chunk = [u8; CHUNK_SIZE];
+
+static ARRAY_POOL: Lazy<ArrayPool<CHUNK_SIZE>> = Lazy::new(|| ArrayPool::new(512));
 
 #[derive(Debug)]
-pub struct ChunkOwned {
+pub struct Chunk {
     id: Uuid,
-    memory: Box<Chunk>,
+    memory: ManagedArray<CHUNK_SIZE>,
 }
 
-impl ChunkOwned {
+impl Chunk {
     pub const SIZE: usize = CHUNK_SIZE;
 
-    pub fn new_zeroed(id: Uuid) -> Self {
-        use std::alloc::Layout;
-
-        const MEMORY_LAYOUT: Layout = Layout::new::<Chunk>();
-
-        // SAFETY: Allocate a zero-initialized `Chunk`-sized region of memory, and read it into box holding a `Chunk`.
-        unsafe {
-            let memory = std::alloc::alloc_zeroed(MEMORY_LAYOUT);
-            let slice_ptr = std::ptr::slice_from_raw_parts_mut(memory, MEMORY_LAYOUT.size());
-            let boxed_slice = Box::from_raw(slice_ptr);
-            let boxed_array = boxed_slice.try_into().unwrap_unchecked();
-
-            Self {
-                id,
-                memory: boxed_array,
-            }
+    pub async fn new_zeroed(id: Uuid) -> Self {
+        Self {
+            id,
+            memory: ARRAY_POOL
+                .get()
+                .await
+                .expect("array pool did not return new array"),
         }
     }
 
-    pub fn id(&self) -> &Uuid {
-        &self.id
-    }
-
-    pub fn into_box(self) -> Box<[u8]> {
-        self.memory
+    pub fn id(&self) -> Uuid {
+        self.id
     }
 }
 
-impl std::ops::Deref for ChunkOwned {
-    type Target = Chunk;
+impl std::ops::Deref for Chunk {
+    type Target = Box<[u8; CHUNK_SIZE]>;
 
     fn deref(&self) -> &Self::Target {
         &self.memory
     }
 }
 
-impl std::ops::DerefMut for ChunkOwned {
+impl std::ops::DerefMut for Chunk {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.memory
     }

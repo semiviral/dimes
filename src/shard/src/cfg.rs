@@ -1,16 +1,22 @@
 use once_cell::sync::Lazy;
 use serde::Deserialize;
 use std::net::SocketAddr;
+use tokio_rustls::rustls::pki_types::ServerName;
 
 #[derive(Debug, Deserialize)]
 pub struct Cfg {
-    bind: SocketAddr,
+    tls: bool,
+    remote: String,
     storage: Storage,
 }
 
 impl Cfg {
-    pub fn bind(&self) -> &SocketAddr {
-        &self.bind
+    pub fn remote(&self) -> &String {
+        &self.remote
+    }
+
+    pub fn use_tls(&self) -> bool {
+        self.tls
     }
 
     pub fn storage(&self) -> &Storage {

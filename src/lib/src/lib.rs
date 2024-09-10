@@ -4,10 +4,13 @@ use uuid::Uuid;
 extern crate tracing;
 
 pub mod chunk;
-pub mod crypto;
+// pub mod crypto;
 // pub mod error;
+pub mod array_pool;
 pub mod net;
-pub mod buf;
+// pub mod buf;
+
+pub const AGENT_STRING_MAX_LEN: usize = 32;
 
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -51,4 +54,14 @@ impl ShardInfo {
     pub fn chunks(&self) -> i64 {
         self.chunks
     }
+}
+
+pub fn split_exact<const N: usize>(slice: &[u8]) -> Option<(&[u8; N], &[u8])> {
+    (slice.len() >= N).then(|| {
+        let slice_n = &slice[..N];
+        let slice = &slice[N..];
+
+        // SAFETY: Slice is split at `N`.
+        (unsafe { slice_n.try_into().unwrap_unchecked() }, slice)
+    })
 }
