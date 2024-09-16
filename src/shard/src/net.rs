@@ -1,13 +1,18 @@
+use anyhow::Result;
+use lib::{
+    bstr::BStr,
+    net::{Connection, Message},
+};
+use once_cell::sync::Lazy;
 use std::{
     net::{SocketAddr, ToSocketAddrs},
     sync::Arc,
+    time::Duration,
 };
-
-use anyhow::{anyhow, Result};
-use lib::net::Message;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     net::TcpStream,
+    time::timeout,
 };
 use tokio_rustls::{
     rustls::{pki_types::ServerName, ClientConfig, RootCertStore},
@@ -22,7 +27,8 @@ pub async fn connect() -> Result<()> {
         .to_socket_addrs()
         .expect("remote address cannot be resolved")
         .collect::<Box<[SocketAddr]>>();
-    let stream = TcpStream::connect(&*addrs).await?;
+
+    let stream = timeout(Duration::from_secs(5), TcpStream::connect(&*addrs)).await??;
 
     if cfg::get().use_tls() {
         let mut root_cert_store = RootCertStore::empty();
@@ -39,43 +45,70 @@ pub async fn connect() -> Result<()> {
             .await
             .expect("TLS connect did not succeed");
 
-        listen(stream).await
+        listen(Connection::new(stream)).await
     } else {
-        listen(stream).await
+        listen(Connection::new(stream)).await
     }
 }
 
-async fn listen(mut stream: impl AsyncRead + AsyncWrite + Unpin) -> Result<()> {
-    Message::ShardInfo {
-        chunks: cfg::get().storage().chunks(),
-        agent: crate::agent_str().to_string(),
+async fn listen<IO: AsyncRead + AsyncWrite + Unpin>(mut connection: Connection<IO>) -> Result<()> {
+    static TIMEOUT: Lazy<Duration> = Lazy::new(|| cfg::get().message_timeout());
+
+    if let Message::AssignId { id } = recv_timeout(&mut connection, *TIMEOUT).await? {
+        connection.send(Message::Ok, true).await?;
+        todo!("set ID")
     }
-    .send(&mut stream);
 
-    // TODO receive server info
+    if let Message::ServerInfo { agent } = recv_timeout(&mut connection, *TIMEOUT).await? {
+        send_timeout(&mut connection, Message::Ok, true, *TIMEOUT).await?;
+        todo!("set server info")
+    }
 
-    if let Message::Info = Message::recv(stream)
-    
+    let shard_info = Message::ShardInfo {
+        chunks: cfg::get().storage().chunks(),
+        agent: BStr::new(crate::agent_str()),
+    };
+    send_timeout(&mut connection, shard_info, true, *TIMEOUT).await?;
 
     loop {
-        match Message::recv(&mut stream).await? {
+        match connection.recv().await? {
             Message::Ok => {}
 
             Message::Ping => {
-                Message::Pong.send(&mut stream).await?;
+                send_timeout(&mut connection, Message::Pong, true, *TIMEOUT).await?;
             }
 
             Message::Pong => {
                 debug!("Server sent unexpected pong. Ignoring.");
             }
 
-            Message::ShardInfo { id, chunks, agent } => todo!(),
-
             Message::ShardStore { chunk } => todo!(),
-
             Message::ShardRetrieve { id } => todo!(),
-
             Message::ShardChunkExists { id } => todo!(),
+
+            message => {
+                error!("Unexpected message (ignoring): {:?}", message);
+            }
         }
     }
+}
+
+async fn send_timeout<IO: AsyncRead + AsyncWrite + Unpin>(
+    connection: &mut Connection<IO>,
+    message: Message,
+    flush: bool,
+    timeout: Duration,
+) -> Result<()> {
+    tokio::time::timeout(timeout, async { connection.send(message, flush).await }).await??;
+
+    Ok(())
+}
+
+async fn recv_timeout<IO: AsyncRead + AsyncWrite + Unpin>(
+    connection: &mut Connection<IO>,
+    timeout: Duration,
+) -> Result<Message> {
+    let message = tokio::time::timeout(timeout, async { connection.recv().await }).await??;
+
+    Ok(message)
 }

@@ -1,7 +1,6 @@
+use once_cell::sync::Lazy;
+use tokio::runtime::{Builder, Runtime};
 use uuid::Uuid;
-
-#[macro_use]
-extern crate tracing;
 
 pub mod chunk;
 // pub mod crypto;
@@ -10,6 +9,16 @@ pub mod array_pool;
 pub mod net;
 // pub mod buf;
 pub mod bstr;
+
+#[macro_use]
+extern crate tracing;
+
+static LIB_RUNTIME: Lazy<Runtime> = Lazy::new(|| {
+    Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("failed to build detached async runtime")
+});
 
 pub const AGENT_STRING_MAX_LEN: usize = 32;
 

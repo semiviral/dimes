@@ -1,21 +1,9 @@
-use std::{net::ToSocketAddrs, sync::Arc};
-
-use chrono::Duration;
-use tokio::{
-    io::{AsyncRead, AsyncWrite},
-    net::TcpStream,
-};
-use tokio_rustls::{
-    rustls::{self, pki_types::ServerName, ClientConfig, RootCertStore},
-    TlsConnector,
-};
+mod cfg;
+mod net;
+mod storage;
 
 #[macro_use]
 extern crate tracing;
-
-mod cfg;
-mod storage;
-mod net;
 
 fn agent_str() -> &'static str {
     concat!("dimese-shard/", env!("CARGO_PKG_VERSION"))
@@ -24,7 +12,6 @@ fn agent_str() -> &'static str {
 #[tokio::main]
 async fn main() {
     use storage::info;
-    use tokio::net;
 
     // Load the environment variables from `.env`.
     dotenvy::dotenv().unwrap();

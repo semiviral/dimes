@@ -1,34 +1,13 @@
 pub mod chunk;
 pub mod info;
 
+use anyhow::Result;
 use once_cell::sync::OnceCell;
 use redb::{Database, Key, ReadOnlyTable, Table, TableDefinition, Value};
-
-#[derive(thiserror::Error, Debug)]
-pub enum Error {
-    #[error(transparent)]
-    Transaction(#[from] redb::TransactionError),
-
-    #[error(transparent)]
-    Commit(#[from] redb::CommitError),
-
-    #[error(transparent)]
-    Table(#[from] redb::TableError),
-
-    #[error(transparent)]
-    Storage(#[from] redb::StorageError),
-}
-
-type Result<T> = std::result::Result<T, Error>;
 
 static DATABASE: OnceCell<Database> = OnceCell::new();
 
 pub fn init() {
-    assert!(
-        DATABASE.get().is_none(),
-        "database has already been initialized"
-    );
-
     let storage = crate::cfg::get().storage();
     let db = Database::create(storage.path()).expect("failed to open or create database");
 
@@ -46,9 +25,7 @@ pub fn init() {
         .commit()
         .expect("failed to commit table initialization");
 
-    DATABASE
-        .set(db)
-        .expect("failed to set global databse reference");
+    DATABASE.set(db).expect("database already initialized");
 }
 
 fn get_db() -> &'static Database {

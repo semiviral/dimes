@@ -1,4 +1,5 @@
 use deadpool::managed::{Manager, Object, Pool, QueueMode};
+use serde::{Serialize, Serializer};
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -75,5 +76,11 @@ impl<const N: usize> std::ops::Deref for ManagedArray<N> {
 impl<const N: usize> std::ops::DerefMut for ManagedArray<N> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
+    }
+}
+
+impl<const N: usize> Serialize for ManagedArray<N> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+        serializer.serialize_bytes(&**self.0)
     }
 }

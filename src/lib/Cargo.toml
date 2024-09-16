@@ -13,6 +13,7 @@ tokio = { version = "*", features = ["full"] }
 serde = { version = "*", features = ["derive"] }
 serde_arrays = "*"
 bincode = "*"
+tokio-rustls = { version = "*", default-features = false }
 
 uuid = { version = "*", features = ["v4", "v7", "fast-rng", "serde"] }
 once_cell = "*"

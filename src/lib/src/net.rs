@@ -1,6 +1,7 @@
-mod message;
-pub use message::*;
+use crate::{bstr::BStr, chunk::Chunk};
+use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncWrite};
+use uuid::Uuid;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -9,9 +10,6 @@ pub enum Error {
 
     #[error("bincode error")]
     Coding(#[from] bincode::Error),
-
-    #[error("network operation timed out")]
-    NetworkTimeout(#[from] tokio::time::error::Elapsed),
 
     #[error("agent string is not valid UTF-8")]
     MessageAgentInvalidUtf8(#[from] std::str::Utf8Error),
@@ -22,18 +20,16 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-trait AsyncStream: AsyncRead + AsyncWrite + Unpin {}
-
-pub struct Connection<'a> {
-    stream: Box<dyn AsyncStream + 'a>,
+pub struct Connection<IO: AsyncRead + AsyncWrite + Unpin> {
+    stream: IO,
     recv_buf: Vec<u8>,
     send_buf: Vec<u8>,
 }
 
-impl<'a> Connection<'a> {
-    pub fn new(stream: impl AsyncStream + 'a) -> Self {
+impl<IO: AsyncRead + AsyncWrite + Unpin> Connection<IO> {
+    pub fn new(stream: IO) -> Self {
         Self {
-            stream: Box::new(stream),
+            stream,
             recv_buf: Vec::new(),
             send_buf: Vec::new(),
         }
@@ -66,4 +62,22 @@ impl<'a> Connection<'a> {
 
         Ok(message)
     }
+}
+
+#[repr(u32)]
+#[derive(Debug, Serialize, Deserialize)]
+pub enum Message {
+    Ok = 0x0,
+
+    Ping = 0x1,
+    Pong = 0x2,
+
+    AssignId { id: Uuid } = 0x3,
+
+    ServerInfo { agent: BStr<64> } = 0x40,
+    ShardInfo { chunks: u64, agent: BStr<64> } = 0x41,
+
+    ShardStore { chunk: Chunk } = 0x100,
+    ShardRetrieve { id: Uuid } = 0x101,
+    ShardChunkExists { id: Uuid } = 0x102,
 }
